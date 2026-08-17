@@ -68,8 +68,8 @@ func TestRendererEnabledColors(t *testing.T) {
 		t.Errorf("PaintStatus(down) = %q, want red", got)
 	}
 	got = r.Paint("ts", RoleTimestamp)
-	if !strings.Contains(got, Dim) {
-		t.Errorf("Paint(timestamp) = %q, want dim", got)
+	if got != "ts" {
+		t.Errorf("Paint(timestamp) = %q, want default intensity (no SGR) per user correction 2026-08-17", got)
 	}
 	got = r.Paint("h", RoleHeader)
 	if !strings.Contains(got, Bold) {

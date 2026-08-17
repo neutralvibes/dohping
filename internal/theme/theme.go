@@ -41,7 +41,9 @@ type Theme struct {
 }
 
 // Default follows spec §11.2: up green, down red, unknown yellow, error
-// magenta, header bold, timestamp dim, duration cyan, failure count red.
+// magenta, header bold, timestamp default intensity (user correction
+// 2026-08-17: dim was too hard to read — the leading column needs no
+// extra muting), duration cyan, failure count red.
 var Default = Theme{
 	Status: map[state.Status]string{
 		state.StatusUp:      Green,
@@ -50,7 +52,7 @@ var Default = Theme{
 		state.StatusError:   Magenta,
 	},
 	Header:    Bold,
-	Timestamp: Dim,
+	Timestamp: "",
 	Duration:  Cyan,
 	Fails:     Red,
 }

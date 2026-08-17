@@ -235,3 +235,40 @@ func TestFullWidthStable(t *testing.T) {
 		t.Errorf("FullWidth = %d, want 81", layout.FullWidth())
 	}
 }
+
+func TestLiveLineAnimationFrame(t *testing.T) {
+	// The liveness animation occupies the single separator cell between
+	// DURATION and MIN (column 48): finalized lines keep a plain space
+	// (byte-identical to spec §7.4), live lines show the rising bar there.
+	layout := plainLayout("192.168.1.23")
+	ln := Line{Time: t0, Status: state.StatusUp, Duration: time.Second, Stats: buildStats(time.Millisecond, 3*time.Millisecond, 2*time.Millisecond, 2)}
+
+	// Finalized line: space at column 48, MIN at column 49.
+	fin := layout.FormatLine(ln)
+	if fin[48] != ' ' {
+		t.Errorf("finalized separator at col 48 = %q, want space", fin[48])
+	}
+	if !strings.HasPrefix(fin[49:], "1.00") {
+		t.Errorf("MIN not at col 49 in finalized line: %q", fin)
+	}
+
+	// Live line: every frame renders at column 48, MIN stays at column 49,
+	// and the frame cycles through the rising bar.
+	want := []rune{'▁', '▃', '▅', '▇'}
+	for i := 0; i < 8; i++ {
+		fr := frameChar(i)
+		if fr != want[i%len(want)] {
+			t.Errorf("frameChar(%d) = %q, want %q", i, fr, want[i%len(want)])
+		}
+		live := layout.FormatLiveLine(ln, fr)
+		runes := []rune(live)
+		if runes[48] != fr {
+			t.Errorf("live frame at col 48 = %q, want %q (line %q)", runes[48], fr, live)
+		}
+		// MIN value must still start at column 49 (animation must not
+		// shift the columns).
+		if !strings.HasPrefix(string(runes[49:]), "1.00") {
+			t.Errorf("MIN shifted by animation: %q", live)
+		}
+	}
+}

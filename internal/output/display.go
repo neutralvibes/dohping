@@ -27,6 +27,7 @@ type Display struct {
 
 	started bool
 	cur     *Line
+	frame   int // liveness animation frame (advances per probe event)
 }
 
 // NewDisplay builds a display. live controls in-place updating (decided
@@ -39,6 +40,7 @@ func NewDisplay(w io.Writer, layout *Layout, quiet, noHeader, live bool) *Displa
 		noHeader: noHeader,
 		live:     live,
 		now:      time.Now,
+		frame:    -1, // first event advances to frame 0 (lowest bar)
 	}
 }
 
@@ -67,7 +69,8 @@ func (d *Display) Handle(ev state.Event) {
 			Fails:  ev.Fails,
 		}
 		if d.live {
-			d.printLine(d.layout.FormatLine(*d.cur), true)
+			d.frame++
+			d.printLine(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)), true)
 		}
 	case state.EventProbeSuccess, state.EventProbeFailure, state.EventProbeError:
 		if d.cur == nil {
@@ -77,7 +80,8 @@ func (d *Display) Handle(ev state.Event) {
 		d.cur.Stats = ev.Stats
 		d.cur.Fails = ev.Fails
 		if d.live {
-			d.printLine(d.layout.FormatLine(*d.cur), true)
+			d.frame++
+			d.printLine(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)), true)
 		}
 	}
 }

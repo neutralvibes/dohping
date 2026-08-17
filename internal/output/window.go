@@ -37,6 +37,7 @@ type Window struct {
 	lastRows int    // rows the block occupied in the previous frame
 	history  []Line // finalized lines, bounded to lines-1
 	cur      *Line  // current live line
+	frame    int    // liveness animation frame (advances per probe event)
 }
 
 // NewWindow builds a window display. lines is the visible data-line count
@@ -50,6 +51,7 @@ func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, hei
 		noHeader: noHeader,
 		heightFn: heightFn,
 		now:      time.Now,
+		frame:    -1, // first event advances to frame 0 (lowest bar)
 	}
 }
 
@@ -70,6 +72,7 @@ func (w *Window) Handle(ev state.Event) {
 	if w.quiet {
 		return
 	}
+	w.frame++ // liveness animation advances per probe event
 	switch ev.Kind {
 	case state.EventStatusChange, state.EventError:
 		w.finalizeLine(ev)
@@ -143,7 +146,9 @@ func (w *Window) Redraw() {
 		case i < len(hist):
 			sb.WriteString(w.layout.FormatLine(hist[i]))
 		case w.cur != nil && i == len(hist):
-			sb.WriteString(w.layout.FormatLine(*w.cur))
+			// Live row carries the liveness animation frame; history rows
+			// stay static (FormatLine) so the block doesn't buzz.
+			sb.WriteString(w.layout.FormatLiveLine(*w.cur, frameChar(w.frame)))
 		}
 		sb.WriteString("\x1b[K") // clear this row to its end (stale chars)
 		if i < visible-1 {

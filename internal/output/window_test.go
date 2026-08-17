@@ -402,3 +402,37 @@ func TestWindowHistoryCapAtLeastOne(t *testing.T) {
 		t.Error("live line missing")
 	}
 }
+
+func TestWindowLiveRowAnimatedHistoryStatic(t *testing.T) {
+	// The liveness animation appears on the live row only; finalized
+	// history rows are plain (user request 2026-08-17). Render through
+	// the terminal emulator and check the visible screen.
+	var buf bytes.Buffer
+	w := newTestWindow(&buf, 5, false, false, 24)
+	w.Handle(changeEvent(t0, state.StatusUp)) // live row, frame 0
+	// Finalize the up line into history, then start a down live row.
+	downEv := state.Event{
+		Kind: state.EventStatusChange, Time: t0.Add(2 * time.Second),
+		Status: state.StatusDown, PrevStatus: state.StatusUp,
+		Duration: 2 * time.Second, Fails: 1,
+	}
+	w.Handle(downEv)
+
+	scr := newTermScreen(10, 120)
+	scr.feed(buf.String())
+	frames := "▁▃▅▇"
+	// Row 1 (first history row) must be static: no frame glyph.
+	if strings.ContainsAny(scr.line(1), frames) {
+		t.Errorf("history row animated: %q", scr.line(1))
+	}
+	// The live row (row 2) carries the animation frame.
+	if !strings.ContainsAny(scr.line(2), frames) {
+		t.Errorf("live row missing animation frame: %q", scr.line(2))
+	}
+	// Column alignment: MIN still under its header (col 49) on the live
+	// row despite the frame at col 48.
+	live := scr.line(2)
+	if len(live) <= 49 || live[49] == 0 {
+		t.Errorf("live row too short for column check: %q", live)
+	}
+}

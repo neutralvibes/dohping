@@ -233,3 +233,55 @@ func TestErrorProbeLiveDurationUpdate(t *testing.T) {
 }
 
 func errBoom() error { return errors.New("boom") }
+
+// TestLiveLineShowsAnimationFrame verifies the liveness animation renders
+// on the live line only: live updates carry the rising bar in the
+// DURATION↔MIN separator (column 48), the finalized line at status change
+// is a plain static line, and non-live output contains no frame glyphs at
+// all (user request 2026-08-17). The visible screen is asserted through
+// the terminal emulator — the raw stream contains every live redraw, so
+// byte-level glyph checks would be wrong (DECISIONS #54 lesson).
+func TestLiveLineShowsAnimationFrame(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplay(&buf, false, false, true) // live
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(time.Second), state.StatusUp, state.Stats{Count: 1, Min: time.Millisecond, Max: time.Millisecond, Sum: time.Millisecond}, 0))
+	// A status change finalizes the up line into a plain static line.
+	downEv := state.Event{
+		Kind: state.EventStatusChange, Time: t0.Add(2 * time.Second),
+		Status: state.StatusDown, PrevStatus: state.StatusUp,
+		Duration: 2 * time.Second, Fails: 1,
+	}
+	d.Handle(downEv)
+
+	scr := newTermScreen(10, 120)
+	scr.feed(buf.String())
+	frames := "▁▃▅▇"
+	// Row 1: the finalized up line — static, no frame glyph.
+	if strings.ContainsAny(scr.line(1), frames) {
+		t.Errorf("finalized line animated: %q", scr.line(1))
+	}
+	// Row 2: the live down line — carries the animation frame.
+	if !strings.ContainsAny(scr.line(2), frames) {
+		t.Errorf("live line missing animation frame: %q", scr.line(2))
+	}
+	// The frame lives at column 48 (between DURATION and MIN).
+	if runes := []rune(scr.line(2)); len(runes) > 48 {
+		if c := runes[48]; !strings.ContainsRune(frames, c) {
+			t.Errorf("live frame not at column 48 (got %q): %q", c, scr.line(2))
+		}
+	}
+}
+
+func TestNonLiveNoAnimation(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplay(&buf, false, false, false) // non-live: finalized only
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(time.Second), state.StatusUp, state.Stats{Count: 1, Min: time.Millisecond, Max: time.Millisecond, Sum: time.Millisecond}, 0))
+	d.Finalize()
+	for _, g := range []string{"▁", "▃", "▅", "▇"} {
+		if strings.Contains(buf.String(), g) {
+			t.Errorf("non-live output contains frame glyph %q: %q", g, buf.String())
+		}
+	}
+}

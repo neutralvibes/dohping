@@ -81,10 +81,30 @@ func (l *Layout) Header() string {
 	return s
 }
 
+// liveFrames is the liveness animation: a rising bar drawn in the single
+// separator cell between DURATION and MIN (column 48), one frame per probe
+// event (user request 2026-08-17). The bar rises then resets — the reset
+// jump is the visible "tick" that draws the eye.
+var liveFrames = []rune{'▁', '▃', '▅', '▇'}
+
+// frameChar returns the animation frame for counter n (cycles).
+func frameChar(n int) rune { return liveFrames[n%len(liveFrames)] }
+
 // FormatLine renders one status line with fixed-width columns. RTT fields
 // are blank unless up; FAILS is blank unless down. Trailing whitespace is
-// trimmed. Colors are applied per field when the theme is active.
-func (l *Layout) FormatLine(ln Line) string {
+// trimmed. Colors are applied per field when the theme is active. The
+// DURATION↔MIN separator is a plain space: finalized/history lines and
+// piped output carry no animation (spec §7.4 byte-identical).
+func (l *Layout) FormatLine(ln Line) string { return l.formatLine(ln, 0) }
+
+// FormatLiveLine renders the LIVE line: identical to FormatLine except the
+// DURATION↔MIN separator cell (column 48) shows the liveness animation
+// frame instead of a space. Only the current line uses this — finalized
+// lines keep FormatLine so history stays static and non-TTY output stays
+// parseable.
+func (l *Layout) FormatLiveLine(ln Line, frame rune) string { return l.formatLine(ln, frame) }
+
+func (l *Layout) formatLine(ln Line, frame rune) string {
 	ts := formatTime(ln.Time, l.timeFormat)
 	status := ln.Status.String()
 	dur := FormatDuration(ln.Duration)
@@ -119,8 +139,12 @@ func (l *Layout) FormatLine(ln Line) string {
 		}
 	}
 
+	sep := " "
+	if frame != 0 {
+		sep = string(frame)
+	}
 	s := strings.Join([]string{
-		fields[0], "  ", fields[1], " ", fields[2], " ", fields[3], " ",
+		fields[0], "  ", fields[1], " ", fields[2], " ", fields[3], sep,
 		fields[4], " ", fields[5], " ", fields[6], " ", fields[7],
 	}, "")
 	return strings.TrimRight(s, " ")
