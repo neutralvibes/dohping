@@ -54,6 +54,10 @@ func (p *pingCmdProbe) Probe(ctx context.Context) Result {
 	}
 	args = append(args, p.ip.String())
 
+	// #nosec G204 -- not a shell: exec.CommandContext runs "ping" directly
+	// with argv, and the only variable element is p.ip.String(), a
+	// canonical net.IP literal (digits/dots/colons — cannot begin with
+	// "-" or carry metacharacters). No injection surface.
 	cmd := exec.CommandContext(ctx, "ping", args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb

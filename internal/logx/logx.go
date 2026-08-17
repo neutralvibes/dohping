@@ -35,7 +35,11 @@ type Logger struct {
 // Format is "text" or "json". A non-nil error means the file could not be
 // used — callers must fail cleanly, never silently drop logs.
 func Open(path, format, host string) (*Logger, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	// The path is the operator's own --log-file argument (a CLI, not a
+	// server: no untrusted boundary to cross) — #nosec G304.
+	// 0600, not 0644: the log carries host/timestamp/status data and must
+	// not be world-readable by default (gosec G302; safe-by-default).
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- user-supplied CLI log path
 	if err != nil {
 		return nil, err
 	}

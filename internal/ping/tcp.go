@@ -37,7 +37,7 @@ func (p *TCPProbe) Probe(ctx context.Context) Result {
 	start := time.Now()
 	conn, err := d.DialContext(ctx, "tcp", p.addr.String())
 	if err == nil {
-		conn.Close()
+		_ = conn.Close() // probe socket: close error is irrelevant to the result
 		return Result{Outcome: OutcomeUp, RTT: time.Since(start)}
 	}
 	return classifyDialError(err, time.Since(start))

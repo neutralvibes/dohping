@@ -74,7 +74,8 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 
 - go1.26.5 linux/amd64, module `dohping` (local-only, no remote).
 - Deps: golang.org/x/net v0.58.0 (icmp), golang.org/x/term v0.45.0.
-- Linters at `~/go/bin/golangci-lint`, `~/go/bin/staticcheck` (from Phase 6).
+- Linters at `~/go/bin/golangci-lint`, `~/go/bin/staticcheck`, `~/go/bin/gosec` (gosec 2.28.0, added 2026-08-17).
+- **Install gosec from the prebuilt GitHub release tarball, NEVER `go install gosec@latest`** — that compiles the Anthropic/OpenAI SDKs (gosec's LLM feature deps) and OOM'd the 4GB sandbox (DECISIONS #63).
 - **Sandbox ICMP reality**: our processes have 0 effective caps → raw sockets
   EPERM; `/bin/ping` works via sandbox elevation → that's why tier 3 exists.
   Do NOT re-litigate; it's settled and user-verified.
@@ -90,7 +91,7 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `e8be5cfdc2c8…` (2026-08-17, acceptance round 5: tick refreshes DURATION #61).
+- Current published linux-amd64 sha: `09fc4d339cb3…` (2026-08-17, gosec round: log 0600 + G104 fix #63).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works
