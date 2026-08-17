@@ -34,6 +34,12 @@ import (
 //
 // The state engine's event semantics are identical to the plain display;
 // only the rendering differs.
+//
+// REFLOWING terminals re-wrap the block on resize (see Display doc —
+// DECISIONS #66): when the width changes, the block queries the terminal's
+// cursor position (DSR/CPR via the app's reanchor callback) — the cursor
+// sits at the end of the re-wrapped block — and recomputes the block's
+// top row from where the terminal actually put it.
 type Window struct {
 	w        io.Writer
 	layout   *Layout
@@ -41,6 +47,7 @@ type Window struct {
 	quiet    bool
 	noHeader bool
 	sizeFn   func() (width, height int) // terminal size; 0 = unknown
+	reanchor func() (row int, ok bool)  // terminal cursor row via DSR/CPR (1-based); nil = never
 	now      func() time.Time
 
 	started      bool
@@ -48,12 +55,17 @@ type Window struct {
 	history      []Line // finalized lines, bounded to lines-1
 	cur          *Line  // current live line
 	frame        int    // liveness animation frame (advances on Tick)
+	lastWidth    int    // terminal width at the last redraw (0 = unknown)
+	anchor       int    // cursor row (CPR base) where the block starts
+	haveAnchor   bool   // anchor calibrated (first redraw / first reflow)
 }
 
 // NewWindow builds a window display. lines is the visible data-line count
 // (--window-lines); sizeFn returns the terminal size in cells (0 =
 // unknown → startup column policy, full configured window height).
-func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, sizeFn func() (width, height int)) *Window {
+// reanchor queries the terminal's cursor row (DSR/CPR) after a width
+// change (nil disables re-anchoring).
+func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, sizeFn func() (width, height int), reanchor func() (row int, ok bool)) *Window {
 	return &Window{
 		w:        w,
 		layout:   layout,
@@ -61,6 +73,7 @@ func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, siz
 		quiet:    quiet,
 		noHeader: noHeader,
 		sizeFn:   sizeFn,
+		reanchor: reanchor,
 		now:      time.Now,
 	}
 }
@@ -187,6 +200,28 @@ func (w *Window) Redraw() {
 	totalPhys := 0
 	for _, s := range rowStrs {
 		totalPhys += physicalRows(cellWidth(s), tw)
+	}
+
+	// Reflowing-terminal re-anchor (DECISIONS #66): when the width
+	// changed since the last redraw, query the terminal's cursor row —
+	// the cursor sits at the end of the (re-wrapped) block — and recompute
+	// the block's top from where the terminal actually put it. On
+	// non-reflowing terminals the cursor agrees with our bookkeeping and
+	// nothing changes; on terminals that do not answer, degrade.
+	if tw > 0 && tw != w.lastWidth && w.reanchor != nil {
+		w.lastWidth = tw
+		if row, ok := w.reanchor(); ok {
+			if !w.haveAnchor {
+				// First draw: the cursor is at the block's top row.
+				w.anchor = row
+				w.haveAnchor = true
+			} else if row != w.anchor+w.lastPhysRows-1 {
+				// Reflow: the block was re-wrapped; the cursor is at the
+				// end of its last row.
+				w.anchor = row - (totalPhys - 1)
+				w.lastPhysRows = totalPhys
+			}
+		}
 	}
 
 	var sb strings.Builder

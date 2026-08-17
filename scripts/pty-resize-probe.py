@@ -89,13 +89,28 @@ class TermScreen:
             end -= 1
         return "".join(cells[:end])
 
+    def resize(self, cols):
+        """Non-reflowing width change (like the pty itself): existing cells
+        keep their positions; only new writes use the new width."""
+        if cols > self.cols:
+            for i in range(len(self.cells)):
+                self.cells[i] = self.cells[i] + [None] * (cols - self.cols)
+        elif cols < self.cols:
+            for i in range(len(self.cells)):
+                self.cells[i] = self.cells[i][:cols]
+        self.cols = cols
+
     def dump(self):
         return "\n".join(f"{r:2}|{self.line(r)}" for r in range(self.rows))
 
 
-def capture(args, cols, rows, resize_to=None, duration=7.0):
+def capture(args, cols, rows, scr, resize_to=None, duration=7.0):
     """Run dohping in a pty of the given size; optionally resize mid-run.
-    Returns (raw_bytes, exit_code)."""
+    scr is a TermScreen fed incrementally; it acts as the terminal for
+    DSR/CPR queries — when dohping asks for its cursor position
+    (\\x1b[6n), the probe answers from the emulator's live cursor, which
+    makes this a true end-to-end test of the re-anchor round-trip
+    (DECISIONS #66). Returns (raw_bytes, exit_code)."""
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["TERM"] = "xterm-256color"
@@ -116,11 +131,19 @@ def capture(args, cols, rows, resize_to=None, duration=7.0):
             if not data:
                 break
             buf += data
+            text = data.decode("utf-8", "replace")
+            scr.feed(text)
+            if "\x1b[6n" in text:
+                # Answer the DSR query with the emulator's cursor position
+                # (CPR, 1-based).
+                os.write(fd, f"\x1b[{scr.r + 1};{scr.c + 1}R".encode())
         now = time.time() - t0
         if not resized and resize_to is not None and now > 3.0:
             # Mid-run resize. SIGWINCH goes to the pty's foreground
-            # process group (dohping).
+            # process group (dohping); the emulator follows (non-reflowing,
+            # like the pty itself).
             set_winsize(fd, rows, resize_to)
+            scr.resize(resize_to)
             resized = True
         if now > duration:
             break
@@ -141,6 +164,7 @@ def capture(args, cols, rows, resize_to=None, duration=7.0):
             if not data:
                 break
             buf += data
+            scr.feed(data.decode("utf-8", "replace"))
     _, status = os.waitpid(pid, 0)
     return buf, os.waitstatus_to_exitcode(status)
 
@@ -153,10 +177,8 @@ def main():
     if mode == "plain":
         # Fixed 60-col pty (below the 81-cell minimum → every line wraps).
         # Many redraws happen over the run; the live line must never drift.
-        buf, code = capture(["--no-window"] + common, 60, rows, duration=6.0)
-        text = buf.decode("utf-8", "replace")
         scr = TermScreen(rows, 60)
-        scr.feed(text)
+        buf, code = capture(["--no-window"] + common, 60, rows, scr, duration=6.0)
         print("=== visible screen (plain live, fixed 60 cols) ===")
         print(scr.dump())
         ts = re.compile(r"^\d{2}:\d{2}:\d{2}")
@@ -167,18 +189,15 @@ def main():
         print("RESULT: " + ("PASS — live line anchored" if ok else "FAIL — drifted/fragmented"))
         return
 
-    # window mode: 60 → 100 mid-run.
-    buf, code = capture(["--window"] + common, 60, rows, resize_to=100)
-    text = buf.decode("utf-8", "replace")
-    # Render ONLY the final window state: emulate the resize by replaying
-    # the stream on a 100-col screen — the last frame's cursor-up math must
-    # have laid the block out for 100 cols.
-    scr = TermScreen(rows, 100)
-    scr.feed(text)
+    # window mode: 60 → 100 mid-run. The emulator tracks the pty live and
+    # answers CPR queries, so the final screen is the emulator's state.
+    scr = TermScreen(rows, 60)
+    buf, code = capture(["--window"] + common, 60, rows, scr, resize_to=100)
     print("=== visible screen at final width (100 cols) ===")
     print(scr.dump())
     print(f"=== exit status: {code} ===")
     # Structural sanity on the raw stream.
+    text = buf.decode("utf-8", "replace")
     print(f"bytes captured: {len(buf)}")
     upseqs = re.findall(r"\x1b\[(\d+)A", text)
     print(f"cursor-up sequences: {len(upseqs)} (last: {upseqs[-1] if upseqs else 'none'})")

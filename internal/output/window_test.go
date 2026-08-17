@@ -17,7 +17,7 @@ func newTestWindow(buf *bytes.Buffer, lines int, quiet, noHeader bool, height in
 
 // newTestWindowSized injects a fixed terminal size. width 0 = unknown.
 func newTestWindowSized(buf *bytes.Buffer, lines int, quiet, noHeader bool, width, height int) *Window {
-	w := NewWindow(buf, plainLayout("192.168.1.23"), lines, quiet, noHeader, func() (int, int) { return width, height })
+	w := NewWindow(buf, plainLayout("192.168.1.23"), lines, quiet, noHeader, func() (int, int) { return width, height }, nil)
 	w.SetNow(func() time.Time { return t0.Add(time.Minute) })
 	return w
 }
@@ -27,7 +27,7 @@ func newTestWindowSized(buf *bytes.Buffer, lines int, quiet, noHeader bool, widt
 // captures the parameter variables themselves, so mutating the returned
 // pointers changes what the next Redraw sees.
 func newTestWindowResizable(buf *bytes.Buffer, host string, lines int, quiet, noHeader bool, width, height int) (*Window, *int, *int) {
-	w := NewWindow(buf, plainLayout(host), lines, quiet, noHeader, func() (int, int) { return width, height })
+	w := NewWindow(buf, plainLayout(host), lines, quiet, noHeader, func() (int, int) { return width, height }, nil)
 	w.SetNow(func() time.Time { return t0.Add(time.Minute) })
 	return w, &width, &height
 }

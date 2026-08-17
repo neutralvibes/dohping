@@ -1,17 +1,19 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (65 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (66 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
 
-**Status: build complete. All 6 phases green. Acceptance rounds 1–7 shipped
-(DECISIONS #50–65, 2026-08-17), including the run-duration docs decision
+**Status: build complete. All 6 phases green. Acceptance rounds 1–8 shipped
+(DECISIONS #50–66, 2026-08-17), including the run-duration docs decision
 (#62), the gosec security round (#63), the window-mode terminal-resize
-round (#64), and the plain-mode live-line resize round (#65). User-verified
-so far: window mode in place, flags on either side of HOST, bare-seconds
-interval/timeout, clean exit summary, the liveness animation, and the
-window-mode resize fix. The plain-mode resize fix (#65) is shipped and
-awaiting the user's own terminal test; expect more acceptance reports.**
+round (#64), the plain-mode live-line resize round (#65), and the
+reflowing-terminal CPR re-anchor round (#66). User-verified so far: window
+mode in place, flags on either side of HOST, bare-seconds interval/timeout,
+clean exit summary, the liveness animation, and the window-mode resize fix.
+The #65/#66 resize work is shipped and awaiting the user's own terminal
+test (their report: "It can creep up and does not clear the rest on wrap" —
+the #66 fix targets exactly that); expect more acceptance reports.**
 
 ---
 
@@ -77,6 +79,7 @@ and stage-marking; if in doubt, ASK, don't assume).
 | 63 | gosec 2.28.0 clean: log 0600, TCP close discarded, 2 justified `#nosec` | "we need gosec" |
 | 64 | Terminal resize handled, platform-split: HOST elastic column (content-fit, terminal-capped, min 15 max 40, `…`), rune-based cell math, window re-measures every redraw, PHYSICAL-row cursor math (wrapped blocks stay coherent); Unix SIGWINCH fast path, Windows self-heals via the 1s tick | "Not handling terminal resize - breaks output" + "must be handled based on platform" |
 | 65 | Plain live line width-aware: same physical-row primitive reduced to one row — lastPhysRows + walk-back + defensive clear (live rewrite AND finalize); HOST stays fixed (scrollback consistency); piped/--no-live untouched; plain mode gains SIGWINCH fast path. Latent fix: stale-clear resets column (`\x1b[1B\r\x1b[K`) — cursor-down preserves the column, so non-blank last rows left stale text (window full-block case too) | "plain mode also needs to be width aware for the current live line only" + user's lastPhysRows design |
+| 66 | REFLOWING-terminal re-anchor via DSR/CPR (root fix for "creep up / does not clear the rest on wrap"): on width change, query the cursor (`\x1b[6n` → `\x1b[<r>;<c>R`, app-owned, key reader parses CSI, 150ms timeout, degrade on no-answer); cursor sits at the end of the re-wrapped line → recompute anchor. Discriminator: CPR row == bookkeeping expectation → no reflow → non-reflowing terminals byte-identical to #65. Both displays (plain live + window block — retires the #64 window creep too). x/term Windows MakeRaw sets ENABLE_VIRTUAL_TERMINAL_INPUT (verified) | "It can creep up and does not clear the rest on wrap" + option A chosen ("lets try your recommendation") |
 
 ## 4. Pending / next actions
 
@@ -87,13 +90,19 @@ and stage-marking; if in doubt, ASK, don't assume).
 - **Animation is user-testing territory**: the rising-bar placement (col 47) and
   the 1-second ticker were both corrected after user reports — if placement or
   cadence comes up again, verify against the rendered-screen tests first.
-- **Resize is user-testing territory**: the #64/#65 design (HOST column
+- **Resize is user-testing territory**: the #64/#65/#66 work (HOST column
   retraction/expansion, `…` truncation at min width, below-floor wrap
-  staying coherent, plain live line staying anchored) was proven in-unit
-  and in a real PTY (scripts/pty-resize-probe.py — `window` and `plain`
-  scenarios), but only the user's terminal is the final acceptance gate.
-  If a resize report comes back, re-verify against the width-injected
-  window/display tests first.
+  staying coherent, plain live line staying anchored, reflowing-terminal
+  CPR re-anchor) was proven in-unit and in a real PTY
+  (scripts/pty-resize-probe.py — `window` and `plain` scenarios, which now
+  answer DSR/CPR queries from the live emulator cursor), but only the
+  user's terminal is the final acceptance gate. If a resize report comes
+  back, re-verify against the width-injected window/display tests first.
+- **CPR nuance**: the re-anchor only engages when stdin is a terminal and
+  the terminal answers DSR/CPR (all real terminals do). Piped stdin or a
+  dumb terminal degrades to the #65 relative behavior. Windows Terminal:
+  VT input enabled by x/term's MakeRaw — but the Windows binary is still
+  never run; first Windows smoke should resize in window mode to confirm.
 - Areas the user has NOT explicitly verified yet (candidates to probe if asked):
   TCP probe mode (`-p tcp`), `--log-file` output (now 0600 — user may notice),
   `--timestamp-format rfc3339`, the darwin/windows binaries (built but never run
@@ -129,7 +138,7 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `6b54a2e58039…` (2026-08-17, plain-mode round #65; served = dist, verified byte-identical over TLS).
+- Current published linux-amd64 sha: `abe9027d6b59…` (2026-08-17, CPR re-anchor round #66; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works
@@ -157,14 +166,16 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   retraction, `…` truncation, below-floor wrap coherence, stale-row clearing.
 - **Real-PTY resize proof**: `python3 scripts/pty-resize-probe.py` spawns the
   built binary in a pty and renders the capture through a VT emulator,
-  printing the visible screen + cursor-up/shrink-clear counts. Scenarios:
-  `window` (60-col pty, mid-run TIOCSWINSZ 60→100 via SIGWINCH — proves the
-  block re-anchors and clears stale rows) and `plain` (fixed 60-col pty —
-  asserts the live line stays anchored at row 2 across a multi-second run,
-  the #65 regression). Run it against a FRESH build (`rm -f` the output
-  first — stale-build trap).
+  printing the visible screen + cursor-up/shrink-clear counts. The probe
+  acts as a minimal terminal: it ANSWERS DSR/CPR queries (`\x1b[6n`) from
+  its live emulator cursor, so the #66 re-anchor round-trip is tested
+  end-to-end in the real binary. Scenarios: `window` (60-col pty, mid-run
+  TIOCSWINSZ 60→100 via SIGWINCH — proves the block re-anchors and clears
+  stale rows) and `plain` (fixed 60-col pty — asserts the live line stays
+  anchored at row 2 across a multi-second run). Run it against a FRESH
+  build (`rm -f` the output first — stale-build trap).
 - Regression tests must accompany every acceptance fix (that's the established
-  pattern, #50–65 all have them).
+  pattern, #50–66 all have them).
 
 ## 8. Project conventions (user's way of working)
 

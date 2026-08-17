@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -73,6 +75,14 @@ const (
 	keyEOF                   // stdin closed
 )
 
+// cprEvent is a terminal cursor-position report (\x1b[<row>;<col>R), the
+// response to a DSR query (\x1b[6n) — used to re-anchor the displays on
+// reflowing terminals after a resize (DECISIONS #66). Rows/cols are
+// 1-based per the VT spec.
+type cprEvent struct {
+	row, col int
+}
+
 // Main is the process entry point: parse args, dispatch, return exit code.
 // Stdout/stderr/tty are injected so tests can capture output.
 func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
@@ -124,6 +134,43 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 
 	live := !opts.NoLive && (opts.LiveMode == "on" || (opts.LiveMode == "auto" && tty.Stdout))
 
+	// Interactive q-quit reader (raw stdin when a terminal). Started
+	// BEFORE the displays are built: they capture the reanchor closure at
+	// construction time, so the real cursor query must be wired first.
+	keyCh := make(chan keyEvent, 1)
+	var cprCh chan cprEvent
+	reanchor := func() (int, bool) { return 0, false } // no-op unless interactive
+	if tty.Stdin && tty.StdinFile != nil {
+		cprCh = make(chan cprEvent, 1)
+		restore, kerr := startKeyReader(tty.StdinFile, keyCh, cprCh)
+		if kerr != nil {
+			fmt.Fprintf(stderr, "dohping: warning: cannot configure interactive quit: %v\n", kerr)
+		} else {
+			defer restore()
+			// Wire the real cursor query now that a reader is listening.
+			reanchor = func() (int, bool) {
+				// Drop any stale response from a previous timed-out query.
+				select {
+				case <-cprCh:
+				default:
+				}
+				fmt.Fprint(stdout, "\x1b[6n")
+				deadline := time.After(150 * time.Millisecond)
+				select {
+				case c := <-cprCh:
+					if c.row > 0 && c.col > 0 {
+						return c.row, true
+					}
+					return 0, false
+				case <-deadline:
+					return 0, false
+				}
+			}
+		}
+	} else {
+		close(keyCh) // no key handling with piped stdin (spec §15.4)
+	}
+
 	// Display selection (spec §17): quiet suppresses all; window mode needs
 	// a terminal (else fall back to plain mode with a warning); otherwise
 	// plain line mode.
@@ -132,7 +179,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	windowActive := opts.Window && tty.Stdout
 	if windowActive {
 		wd := output.NewWindow(stdout, layout, opts.WindowLines, opts.Quiet, opts.NoHeader,
-			defaultSizeFn(stdout))
+			defaultSizeFn(stdout), reanchor)
 		wd.Enter()
 		defer wd.Exit()
 		disp = wd
@@ -144,7 +191,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 			fmt.Fprintln(stderr, "dohping: warning: --window requires a terminal; falling back to plain line mode")
 		}
 		disp = output.NewDisplay(stdout, layout, opts.Quiet, opts.NoHeader, live,
-			defaultSizeFn(stdout))
+			defaultSizeFn(stdout), reanchor)
 		if live {
 			// Plain live mode gets the same SIGWINCH fast path as the
 			// window: an immediate live-line repaint re-anchors the
@@ -171,19 +218,6 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		tick := time.NewTicker(time.Second)
 		defer tick.Stop()
 		tickCh = tick.C
-	}
-
-	// Interactive q-quit reader (raw stdin when a terminal).
-	keyCh := make(chan keyEvent, 1)
-	if tty.Stdin && tty.StdinFile != nil {
-		restore, kerr := startKeyReader(tty.StdinFile, keyCh)
-		if kerr != nil {
-			fmt.Fprintf(stderr, "dohping: warning: cannot configure interactive quit: %v\n", kerr)
-		} else {
-			defer restore()
-		}
-	} else {
-		close(keyCh) // no key handling with piped stdin (spec §15.4)
 	}
 
 	events := make(chan state.Event, 8)
@@ -296,10 +330,14 @@ func defaultSizeFn(w io.Writer) func() (int, int) {
 
 // startKeyReader puts stdin into raw mode and reads keys in a goroutine.
 // q/Q quits (exit 0); 0x03 (Ctrl-C in raw mode, ISIG off) interrupts
-// (exit 130). The terminal is restored when the reader exits and by the
-// returned restore function. With raw stdin, Ctrl-C no longer raises
-// SIGINT — the byte is mapped here so the exit code contract holds.
-func startKeyReader(f *os.File, out chan<- keyEvent) (restore func(), err error) {
+// (exit 130). CSI sequences are parsed: a cursor-position report
+// (\x1b[<row>;<col>R — the terminal's answer to a DSR \x1b[6n query) is
+// delivered on cpr for the displays' reflow re-anchor (DECISIONS #66);
+// other CSI sequences (arrow keys etc.) are ignored. The terminal is
+// restored when the reader exits and by the returned restore function.
+// With raw stdin, Ctrl-C no longer raises SIGINT — the byte is mapped
+// here so the exit code contract holds.
+func startKeyReader(f *os.File, out chan<- keyEvent, cpr chan<- cprEvent) (restore func(), err error) {
 	oldState, err := term.MakeRaw(int(f.Fd()))
 	if err != nil {
 		return nil, err
@@ -324,10 +362,52 @@ func startKeyReader(f *os.File, out chan<- keyEvent) (restore func(), err error)
 			case 0x04: // Ctrl-D: EOF for the reader, terminal restored
 				out <- keyEOF
 				return
+			case 0x1b:
+				// CSI sequence — possibly a CPR response. Read the
+				// introducer, then parameters up to the final byte.
+				next, err := r.ReadByte()
+				if err != nil {
+					out <- keyEOF
+					return
+				}
+				if next != '[' {
+					continue // ESC + non-CSI (e.g. lone ESC): ignore
+				}
+				params := make([]byte, 0, 8)
+				for {
+					c, err := r.ReadByte()
+					if err != nil {
+						out <- keyEOF
+						return
+					}
+					if c >= 0x40 && c <= 0x7e { // final byte
+						if c == 'R' {
+							if row, col, ok := parseCPR(params); ok {
+								cpr <- cprEvent{row: row, col: col}
+							}
+						}
+						break
+					}
+					params = append(params, c)
+				}
 			}
 		}
 	}()
 	return restore, nil
+}
+
+// parseCPR parses \x1b[<row>;<col>R parameters (1-based VT coordinates).
+func parseCPR(params []byte) (row, col int, ok bool) {
+	parts := strings.Split(string(params), ";")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	r, err1 := strconv.Atoi(parts[0])
+	c, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil || r < 1 || c < 1 {
+		return 0, 0, false
+	}
+	return r, c, true
 }
 
 // logEvent logs the state that just ended, if it is a real status period
