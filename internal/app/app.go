@@ -143,7 +143,17 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		if opts.Window && !opts.Quiet {
 			fmt.Fprintln(stderr, "dohping: warning: --window requires a terminal; falling back to plain line mode")
 		}
-		disp = output.NewDisplay(stdout, layout, opts.Quiet, opts.NoHeader, live)
+		disp = output.NewDisplay(stdout, layout, opts.Quiet, opts.NoHeader, live,
+			defaultSizeFn(stdout))
+		if live {
+			// Plain live mode gets the same SIGWINCH fast path as the
+			// window: an immediate live-line repaint re-anchors the
+			// wrapped line the moment the terminal changes (the 1-second
+			// tick would otherwise cover it within a second).
+			c, stop := signalx.Winch()
+			defer stop()
+			winchCh = c
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -227,9 +237,12 @@ loop:
 				keyCh = nil
 			}
 		case <-winchCh:
-			if wd, ok := disp.(*output.Window); ok {
-				wd.Redraw()
-			}
+			// Immediate repaint on terminal resize (Unix SIGWINCH fast
+			// path). Tick is the right repaint for both displays: Window
+			// redraws the block, Display re-anchors the live line. On
+			// Windows the channel never fires — the 1-second tick covers
+			// resizes there (platform-split, DECISIONS #64/#65).
+			disp.Tick()
 		case <-tickCh:
 			disp.Tick()
 		}

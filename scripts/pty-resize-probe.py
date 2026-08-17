@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
-"""Real-PTY resize proof for dohping window mode.
+"""Real-PTY proof harness for dohping's terminal-output rounds.
 
-Spawns dohping --window in a 60x24 pty, resizes the pty to 100x24 mid-run
-(SIGWINCH + TIOCSWINSZ), captures the full stream, then renders it through
-a minimal VT emulator (autowrap, CR/LF, CUU/CUD, EL) and prints the visible
-screen at the end — the real-binary equivalent of the Go termScreen tests.
+Scenarios (argv[1]):
+  window (default): spawns dohping --window in a 60x24 pty, resizes the pty
+    to 100x24 mid-run (SIGWINCH + TIOCSWINSZ), renders the capture through
+    a VT emulator and prints the visible screen — proves the block
+    re-anchors on resize and clears stale wrapped rows.
+  plain: spawns PLAIN live mode in a fixed 60x24 pty (below the 81-cell
+    minimum, so every line wraps) and asserts the live line stays anchored
+    across many redraws — the pre-#65 code walked it DOWN one row per
+    redraw, leaving stale fragments.
+
+Run against a FRESH build (rm -f the binary first — stale-build trap):
+  python3 scripts/pty-resize-probe.py [window|plain]
 """
 import fcntl
 import os
 import pty
+import re
 import select
 import signal
 import struct
@@ -84,13 +93,13 @@ class TermScreen:
         return "\n".join(f"{r:2}|{self.line(r)}" for r in range(self.rows))
 
 
-def main():
-    cols, rows = 60, 24
+def capture(args, cols, rows, resize_to=None, duration=7.0):
+    """Run dohping in a pty of the given size; optionally resize mid-run.
+    Returns (raw_bytes, exit_code)."""
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["TERM"] = "xterm-256color"
-        os.execv("/tmp/dohping-test",
-                 ["dohping", "--window", "-i", "1", "-p", "tcp", "--no-color", "1.1.1.1"])
+        os.execv("/tmp/dohping-test", ["dohping"] + args)
         os._exit(127)
 
     set_winsize(fd, rows, cols)
@@ -108,12 +117,12 @@ def main():
                 break
             buf += data
         now = time.time() - t0
-        if not resized and now > 3.0:
-            # Mid-run resize: 60 → 100 cols. SIGWINCH goes to the pty's
-            # foreground process group (dohping).
-            set_winsize(fd, rows, 100)
+        if not resized and resize_to is not None and now > 3.0:
+            # Mid-run resize. SIGWINCH goes to the pty's foreground
+            # process group (dohping).
+            set_winsize(fd, rows, resize_to)
             resized = True
-        if now > 7.0:
+        if now > duration:
             break
 
     try:
@@ -133,7 +142,33 @@ def main():
                 break
             buf += data
     _, status = os.waitpid(pid, 0)
+    return buf, os.waitstatus_to_exitcode(status)
 
+
+def main():
+    mode = sys.argv[1] if len(sys.argv) > 1 else "window"
+    rows = 24
+    common = ["-i", "1", "-p", "tcp", "--no-color", "1.1.1.1"]
+
+    if mode == "plain":
+        # Fixed 60-col pty (below the 81-cell minimum → every line wraps).
+        # Many redraws happen over the run; the live line must never drift.
+        buf, code = capture(["--no-window"] + common, 60, rows, duration=6.0)
+        text = buf.decode("utf-8", "replace")
+        scr = TermScreen(rows, 60)
+        scr.feed(text)
+        print("=== visible screen (plain live, fixed 60 cols) ===")
+        print(scr.dump())
+        ts = re.compile(r"^\d{2}:\d{2}:\d{2}")
+        anchors = [r for r in range(rows) if ts.match(scr.line(r))]
+        ok = len(anchors) == 1 and anchors[0] == 2
+        print(f"=== exit status: {code} ===")
+        print(f"timestamp rows: {anchors} (want exactly [2] — header wraps to rows 0-1)")
+        print("RESULT: " + ("PASS — live line anchored" if ok else "FAIL — drifted/fragmented"))
+        return
+
+    # window mode: 60 → 100 mid-run.
+    buf, code = capture(["--window"] + common, 60, rows, resize_to=100)
     text = buf.decode("utf-8", "replace")
     # Render ONLY the final window state: emulate the resize by replaying
     # the stream on a 100-col screen — the last frame's cursor-up math must
@@ -142,13 +177,12 @@ def main():
     scr.feed(text)
     print("=== visible screen at final width (100 cols) ===")
     print(scr.dump())
-    print(f"=== exit status: {os.waitstatus_to_exitcode(status)} ===")
+    print(f"=== exit status: {code} ===")
     # Structural sanity on the raw stream.
     print(f"bytes captured: {len(buf)}")
-    import re
     upseqs = re.findall(r"\x1b\[(\d+)A", text)
     print(f"cursor-up sequences: {len(upseqs)} (last: {upseqs[-1] if upseqs else 'none'})")
-    print(f"shrink-clear sequences (ESC[1B ESC[K): {text.count(chr(27)+'[1B'+chr(27)+'[K')}")
+    print(f"shrink-clear sequences (ESC[1B CR ESC[K): {text.count(chr(27)+'[1B'+chr(13)+chr(27)+'[K')}")
 
 
 if __name__ == "__main__":

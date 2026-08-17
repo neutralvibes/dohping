@@ -79,6 +79,10 @@ Timing model: the first probe fires immediately, then probes start one
   (TTY only) while the status is unchanged
 - when the status changes, the previous line is finalized into scrollback
   history and a new line begins
+- the live line is width-aware: if the terminal is narrower than the line
+  it wraps, and it stays anchored in place across updates (resizes
+  self-heal within a second, or immediately on Unix via SIGWINCH).
+  Finalized and piped/`--no-live` output is unaffected — plain lines.
 - when stdout is piped, output is finalized lines only — no ANSI, no
   carriage returns
 
@@ -112,7 +116,8 @@ immediately; on Windows (no SIGWINCH) the 1-second tick re-measures, so
 resizes self-heal within a second. Every repaint re-reads the terminal
 size: the HOST column retracts/expands to fit (minimum 15 + the fixed
 columns = 81 cells), and if the terminal is narrower than that minimum the
-lines wrap but the block stays a coherent, non-interleaved stack.
+lines wrap but the block stays a coherent, non-interleaved stack. The
+plain line mode's single live line gets the same treatment (see above).
 
 ## Logging
 

@@ -20,9 +20,24 @@ func successEvent(t time.Time, st state.Status, stats state.Stats, fails int) st
 }
 
 func newTestDisplay(w *bytes.Buffer, quiet, noHeader, live bool) *Display {
-	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live)
+	// Width 0 = unknown (never wrap) — the pre-#65 behavior.
+	return newTestDisplaySized(w, quiet, noHeader, live, 0, 0)
+}
+
+// newTestDisplaySized injects a terminal size; width drives the live
+// line's wrap bookkeeping (DECISIONS #65).
+func newTestDisplaySized(w *bytes.Buffer, quiet, noHeader, live bool, width, height int) *Display {
+	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height })
 	d.SetNow(func() time.Time { return t0.Add(time.Minute) })
 	return d
+}
+
+// newTestDisplayResizable injects a MUTABLE terminal size: tests simulate
+// a resize by changing the captured variables between redraws.
+func newTestDisplayResizable(w *bytes.Buffer, quiet, noHeader, live bool, width, height int) (*Display, *int, *int) {
+	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height })
+	d.SetNow(func() time.Time { return t0.Add(time.Minute) })
+	return d, &width, &height
 }
 
 func TestHeaderPrintedByDefault(t *testing.T) {
@@ -348,5 +363,130 @@ func TestNonLiveNoAnimation(t *testing.T) {
 		if strings.Contains(buf.String(), g) {
 			t.Errorf("non-live output contains frame glyph %q: %q", g, buf.String())
 		}
+	}
+}
+
+// TestDisplayLiveLineStaysAnchoredWhenWrapped is the regression test for
+// the reported plain-mode bug (DECISIONS #65): at a width below the
+// minimum the live line wraps, and the pre-fix code wrote every redraw at
+// the cursor's CURRENT row (the end of the wrapped tail), so the line
+// walked DOWN one row per redraw, leaving stale fragments at every
+// previous position. The fix walks back to the true start and the line
+// must stay anchored at rows 2-3 (header wrapped to rows 0-1) across many
+// redraws.
+func TestDisplayLiveLineStaysAnchoredWhenWrapped(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplaySized(&buf, false, false, true, 60, 24)
+	d.Handle(changeEvent(t0, state.StatusUp))
+	for i := 1; i <= 3; i++ {
+		d.Handle(successEvent(t0.Add(time.Duration(i)*time.Second), state.StatusUp,
+			buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	}
+	d.Tick() // another frame with a fresh wall-clock duration
+
+	scr := newTermScreen(24, 60)
+	scr.feed(buf.String())
+
+	if !strings.HasPrefix(scr.line(0), "TIME") {
+		t.Errorf("row 0 must be the header: %q", scr.line(0))
+	}
+	var anchors []int
+	for r := 0; r < scr.rows; r++ {
+		if strings.HasPrefix(scr.line(r), "11:00:35") {
+			anchors = append(anchors, r)
+		}
+	}
+	if len(anchors) != 1 || anchors[0] != 2 {
+		t.Errorf("live line anchored at rows %v, want exactly [2] (no downward drift): %q", anchors, screenRows(scr))
+	}
+	for r := 0; r < scr.rows; r++ {
+		if strings.Count(scr.line(r), "11:00:35") > 1 {
+			t.Errorf("row %d carries two timestamps (interleaved): %q", r, scr.line(r))
+		}
+	}
+}
+
+// TestDisplayLiveLineGrowBackClearsTail: growing the terminal back after a
+// wrapped live line must clear the stale wrap tail (the pre-#65 code left
+// the tail row's text forever — it was never revisited). The frames are
+// rendered at their own widths: frame 1 on a 60-col screen, then the
+// screen GROWS to 120 without reflow (xterm-style — existing cells stay),
+// then frame 2 renders on the 120-col screen.
+func TestDisplayLiveLineGrowBackClearsTail(t *testing.T) {
+	var buf bytes.Buffer
+	d, wPtr, _ := newTestDisplayResizable(&buf, false, false, true, 60, 24)
+	*wPtr = 60
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0)) // 69 cells → wraps
+	frame1 := buf.String()
+
+	buf.Reset()
+	*wPtr = 120
+	d.Tick() // 1 row at the anchor; the old tail row must be cleared
+	frame2 := buf.String()
+
+	scr := newTermScreen(24, 60)
+	scr.feed(frame1)
+	scr.resize(120)
+	scr.feed(frame2)
+	if !strings.HasPrefix(scr.line(2), "11:00:35") {
+		t.Errorf("live line not at row 2 after grow-back: row2=%q", scr.line(2))
+	}
+	if got := scr.line(3); got != "" {
+		t.Errorf("stale wrap tail not cleared on grow-back: row3=%q", got)
+	}
+}
+
+// TestDisplayFinalizeAfterWrappedLiveLineStartsClean: finalizing a wrapped
+// live line must write the finalized line from the live line's TRUE start
+// (walk-back), not from the cursor's row on the wrap tail — otherwise the
+// finalized scrollback line's head is chopped into the old tail. The new
+// live line then starts fresh below it. (The up line carries RTT stats so
+// it genuinely wraps at 60; a statless up line is only 48 cells.)
+func TestDisplayFinalizeAfterWrappedLiveLineStartsClean(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplaySized(&buf, false, false, true, 60, 24)
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0)) // live up: rows 2-3
+	downEv := state.Event{
+		Kind: state.EventStatusChange, Time: t0.Add(30 * time.Second),
+		Status: state.StatusDown, PrevStatus: state.StatusUp,
+		Duration: 30 * time.Second, Fails: 1,
+		PrevStats: buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), // ended up state
+	}
+	d.Handle(downEv) // finalize the up line, start a down live line
+
+	scr := newTermScreen(24, 60)
+	scr.feed(buf.String())
+	// The finalized line starts at the anchor row (2) at column 0 with its
+	// own timestamp; the new live line starts at row 4 below it.
+	if !strings.HasPrefix(scr.line(2), "11:00:35") {
+		t.Errorf("finalized line not at row 2 col 0 (interleaved with wrap tail?): row2=%q", scr.line(2))
+	}
+	if !strings.HasPrefix(scr.line(4), "11:01:05") {
+		t.Errorf("new live line not at row 4: row4=%q", scr.line(4))
+	}
+	// Exactly one of each timestamp on screen — no duplicated fragments.
+	if got := strings.Count(strings.Join(screenRows(scr), "\n"), "11:00:35"); got != 1 {
+		t.Errorf("finalized timestamp appears %d times: %q", got, screenRows(scr))
+	}
+	if got := strings.Count(strings.Join(screenRows(scr), "\n"), "11:01:05"); got != 1 {
+		t.Errorf("live timestamp appears %d times: %q", got, screenRows(scr))
+	}
+}
+
+// TestDisplayNonLiveStaysEscapeFree: the wrap primitive must NEVER engage
+// for piped/--no-live output — even at a width that would wrap, the output
+// stays plain newline-terminated lines (the script contract, spec §2.5).
+func TestDisplayNonLiveStaysEscapeFree(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplaySized(&buf, false, false, false, 60, 24)
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(time.Second), state.StatusUp, state.Stats{Count: 1, Min: time.Millisecond, Max: time.Millisecond, Sum: time.Millisecond}, 0))
+	d.Finalize()
+	if strings.Contains(buf.String(), "\x1b") {
+		t.Errorf("non-live output contains escapes: %q", buf.String())
 	}
 }

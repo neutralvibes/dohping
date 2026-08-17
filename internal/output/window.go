@@ -208,10 +208,13 @@ func (w *Window) Redraw() {
 	}
 	// If the block shrank (terminal resized bigger, or a wrapped line
 	// unwrapped), clear the stale rows left below it, then return the
-	// cursor to the new last row.
+	// cursor to the new last row. Each clear resets to column 0 first:
+	// cursor-down preserves the column, and the cursor may sit at the end
+	// of a non-blank last row (full window), so ESC[K alone would only
+	// clear from that column and leave the stale text (DECISIONS #65).
 	if w.started && w.lastPhysRows > totalPhys {
 		for i := 0; i < w.lastPhysRows-totalPhys; i++ {
-			sb.WriteString("\x1b[1B\x1b[K")
+			sb.WriteString("\x1b[1B\r\x1b[K")
 		}
 		fmt.Fprintf(&sb, "\x1b[%dA", w.lastPhysRows-totalPhys)
 	}

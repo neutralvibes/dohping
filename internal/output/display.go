@@ -3,6 +3,7 @@ package output
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"dohping/internal/state"
@@ -17,28 +18,47 @@ import (
 //     (printed once with a newline) and a new line begins
 //   - non-live output (piped, --no-live) prints finalized lines only,
 //     never carriage returns or ANSI
+//
+// Live-line width awareness (DECISIONS #65): the live line is re-anchored
+// on every redraw using the same physical-row primitive as the window
+// block, reduced to one row's bookkeeping. If the terminal is narrower
+// than the line it WRAPS, and without bookkeeping every redraw would
+// start at the cursor's current row (the end of the wrapped tail), so the
+// line walked down the page one row per redraw leaving stale fragments.
+// The display tracks lastPhysRows (physical rows the previous live line
+// occupied), walks back to the true start before rewriting, and clears
+// rows the line no longer uses when it shrinks (e.g. the terminal grew
+// back). Column widths stay FIXED for the run — plain mode's history is
+// the terminal's scrollback, which cannot be re-laid-out, so HOST never
+// re-measures here (unlike window mode, which repaints its own buffer).
+// The primitive engages only when live; piped/--no-live output is
+// byte-identical plain lines.
 type Display struct {
 	w        io.Writer
 	layout   *Layout
 	quiet    bool
 	noHeader bool
 	live     bool
+	sizeFn   func() (width, height int) // terminal size; width drives wrap math (0 = unknown)
 	now      func() time.Time
 
-	started bool
-	cur     *Line
-	frame   int // liveness animation frame (advances per probe event)
+	started      bool
+	cur          *Line
+	frame        int // liveness animation frame (advances per probe event)
+	lastPhysRows int // physical rows the previous live line occupied (wrap bookkeeping)
 }
 
 // NewDisplay builds a display. live controls in-place updating (decided
-// by the caller from --live/--no-live and TTY state).
-func NewDisplay(w io.Writer, layout *Layout, quiet, noHeader, live bool) *Display {
+// by the caller from --live/--no-live and TTY state). sizeFn returns the
+// terminal size (0 = unknown → never wrap); nil means never wrap.
+func NewDisplay(w io.Writer, layout *Layout, quiet, noHeader, live bool, sizeFn func() (width, height int)) *Display {
 	return &Display{
 		w:        w,
 		layout:   layout,
 		quiet:    quiet,
 		noHeader: noHeader,
 		live:     live,
+		sizeFn:   sizeFn,
 		now:      time.Now,
 	}
 }
@@ -54,7 +74,7 @@ func (d *Display) Handle(ev state.Event) {
 	if !d.started {
 		d.started = true
 		if !d.noHeader {
-			d.printLine(d.layout.Header(), false)
+			d.printLine(d.layout.Header())
 		}
 	}
 
@@ -68,7 +88,7 @@ func (d *Display) Handle(ev state.Event) {
 			Fails:  ev.Fails,
 		}
 		if d.live {
-			d.printLine(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)), true)
+			d.writeLive(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)))
 		}
 	case state.EventProbeSuccess, state.EventProbeFailure, state.EventProbeError:
 		if d.cur == nil {
@@ -78,7 +98,7 @@ func (d *Display) Handle(ev state.Event) {
 		d.cur.Stats = ev.Stats
 		d.cur.Fails = ev.Fails
 		if d.live {
-			d.printLine(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)), true)
+			d.writeLive(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)))
 		}
 	}
 }
@@ -98,7 +118,7 @@ func (d *Display) Tick() {
 	}
 	d.cur.Duration = d.now().Sub(d.cur.Time)
 	d.frame++
-	d.printLine(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)), true)
+	d.writeLive(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)))
 }
 
 // finalizeLine prints the current line as finalized history when a status
@@ -129,27 +149,89 @@ func (d *Display) Finalize() {
 }
 
 // printFinalized writes a finalized line. In live mode the cursor sits at
-// the end of the last live update, so the line must be preceded by a
-// carriage return (plus clear-to-EOL to wipe any live residue); it must
-// also END with an explicit CRLF — a bare LF moves down but does not
-// reset the column, so whatever prints next (the exit summary) would
-// start mid-line and drift right (DECISIONS #54 lesson, user report
-// 2026-08-17). In non-live mode it is plain newline-terminated output.
+// the end of the last live update (possibly on a WRAPPED tail row), so the
+// line must be walked back to the live line's true start before writing,
+// plus clear-to-EOL to wipe any live residue, and must END with an explicit
+// CRLF — a bare LF moves down but does not reset the column, so whatever
+// prints next (the exit summary) would start mid-line and drift right
+// (DECISIONS #54 lesson, user report 2026-08-17). Defensive clearing
+// removes rows the previous live line used but this finalized line does
+// not (DECISIONS #65). The next live line starts fresh below, so the wrap
+// bookkeeping resets. In non-live mode it is plain newline-terminated
+// output.
 func (d *Display) printFinalized(s string) {
-	if d.live {
-		fmt.Fprintf(d.w, "\r%s\x1b[K\r\n", s)
+	if !d.live {
+		fmt.Fprintln(d.w, s)
 		return
 	}
-	fmt.Fprintln(d.w, s)
+	tw := d.termWidth()
+	var sb strings.Builder
+	if d.lastPhysRows > 1 {
+		fmt.Fprintf(&sb, "\x1b[%dA\r", d.lastPhysRows-1)
+	} else {
+		sb.WriteString("\r") // always return to column 0 first
+	}
+	sb.WriteString(s)
+	sb.WriteString("\x1b[K")
+	phys := physicalRows(cellWidth(s), tw)
+	if phys < d.lastPhysRows {
+		for i := 0; i < d.lastPhysRows-phys; i++ {
+			// Reset to column 0 before clearing: cursor-down preserves the
+			// column, and the cursor sits at the END of the written line —
+			// ESC[K alone would only clear from there and leave the stale
+			// text at the row's start (DECISIONS #65).
+			sb.WriteString("\x1b[1B\r\x1b[K")
+		}
+		fmt.Fprintf(&sb, "\x1b[%dA", d.lastPhysRows-phys)
+	}
+	sb.WriteString("\r\n")
+	d.lastPhysRows = 1 // next live line starts fresh below the finalized line
+	fmt.Fprint(d.w, sb.String())
 }
 
-// printLine writes a line. Live lines use a carriage return + clear-to-EOL
-// so the previous live line is overwritten in place; finalized lines are
-// plain newline-terminated output (scrollback history).
-func (d *Display) printLine(s string, live bool) {
-	if live {
-		fmt.Fprintf(d.w, "\r%s\x1b[K", s)
-		return
+// writeLive writes the live line in place with wrap bookkeeping (DECISIONS
+// #65): if the previous live line wrapped, walk back to its true start
+// before rewriting (the cursor sits on the wrapped tail row otherwise);
+// if this line uses fewer rows than the previous one (terminal grew back),
+// clear the rows no longer used. Terminal width is re-read on EVERY write,
+// so a resize is picked up by probe events, the 1-second tick, and the
+// SIGWINCH fast path alike.
+func (d *Display) writeLive(s string) {
+	tw := d.termWidth()
+	var sb strings.Builder
+	if d.lastPhysRows > 1 {
+		fmt.Fprintf(&sb, "\x1b[%dA\r", d.lastPhysRows-1)
+	} else {
+		sb.WriteString("\r") // always return to column 0 first
 	}
+	sb.WriteString(s)
+	sb.WriteString("\x1b[K")
+	phys := physicalRows(cellWidth(s), tw)
+	if phys < d.lastPhysRows {
+		for i := 0; i < d.lastPhysRows-phys; i++ {
+			// Reset to column 0 before clearing: cursor-down preserves the
+			// column, and the cursor sits at the END of the written line —
+			// ESC[K alone would only clear from there and leave the stale
+			// text at the row's start (DECISIONS #65).
+			sb.WriteString("\x1b[1B\r\x1b[K")
+		}
+		fmt.Fprintf(&sb, "\x1b[%dA", d.lastPhysRows-phys)
+	}
+	d.lastPhysRows = phys
+	fmt.Fprint(d.w, sb.String())
+}
+
+// termWidth returns the terminal width in cells (0 = unknown → no wrap).
+func (d *Display) termWidth() int {
+	if d.sizeFn == nil {
+		return 0
+	}
+	w, _ := d.sizeFn()
+	return w
+}
+
+// printLine writes a plain (non-live) line: the header, or finalized
+// lines in non-live mode.
+func (d *Display) printLine(s string) {
 	fmt.Fprintln(d.w, s)
 }

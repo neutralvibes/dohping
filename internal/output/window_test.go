@@ -169,6 +169,24 @@ func (t *termScreen) line(r int) string {
 	return string(runes[:end])
 }
 
+// resize changes the terminal width WITHOUT reflowing existing content —
+// the behavior of xterm/gnome-terminal-style terminals on resize (lines
+// keep their cells; only new writes use the new width). Used to simulate
+// a mid-run resize faithfully (DECISIONS #65); the cursor is left where
+// it was, exactly as a non-reflowing terminal leaves it.
+func (t *termScreen) resize(cols int) {
+	if cols > t.cols {
+		for i := range t.cells {
+			t.cells[i] = append(t.cells[i], make([]rune, cols-t.cols)...)
+		}
+	} else if cols < t.cols {
+		for i := range t.cells {
+			t.cells[i] = t.cells[i][:cols]
+		}
+	}
+	t.cols = cols
+}
+
 // TestWindowRenderedScreenClean is the regression test for DECISIONS #54:
 // the visible screen after several redraws must be a clean fixed block —
 // one header row, one live line, blank padding — with no stale fragments
@@ -498,6 +516,49 @@ func TestWindowTickRefreshesDuration(t *testing.T) {
 // statusCol returns the column where the status value starts on the given
 // rendered row: TIME(8) + 2sp + HOST(hostWidth) + 1sp.
 func statusCol(hostWidth int) int { return 8 + 2 + hostWidth + 1 }
+
+// TestWindowResizeGrowBackClearsStaleRowsFullBlock: the stale-row clear
+// must wipe the ENTIRE row, not just from the cursor's column — with a
+// FULL block (history + live, no blank padding) the cursor sits at the end
+// of the live line, and a clear without a column reset would leave the
+// stale wrap tail's text behind (DECISIONS #65).
+func TestWindowResizeGrowBackClearsStaleRowsFullBlock(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _ := newTestWindowResizable(&buf, "frigate.app.home", 2, false, false, 60, 24)
+	*wPtr = 60
+	// Fill the block: one finalized history line + live (window-lines 2 →
+	// rows = header + 2 data, no padding).
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	upEv := state.Event{
+		Kind: state.EventStatusChange, Time: t0.Add(4 * time.Second),
+		Status: state.StatusUp, PrevStatus: state.StatusUp,
+		Duration: 4 * time.Second, PrevStats: buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1),
+	}
+	w.Handle(upEv) // history 1 + live 1 — full block
+	frame1 := buf.String()
+
+	buf.Reset()
+	*wPtr = 120
+	w.Tick()
+	frame2 := buf.String()
+
+	scr := newTermScreen(24, 60)
+	scr.feed(frame1)
+	scr.resize(120)
+	scr.feed(frame2)
+	// The block's last row (the live line) is non-blank; the stale rows
+	// below it must be fully cleared.
+	for r := 3; r < 8; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not cleared after grow-back (full block): %q", r, got)
+		}
+	}
+	if !strings.HasPrefix(scr.line(0), "TIME") {
+		t.Errorf("row 0 must be the header: %q", scr.line(0))
+	}
+}
 
 // TestWindowResizeRetractsHostColumn: on a narrow terminal the HOST column
 // retracts to fit (content-fit with terminal cap — user-approved
