@@ -236,10 +236,10 @@ func errBoom() error { return errors.New("boom") }
 
 // TestLiveLineShowsAnimationFrame verifies the liveness animation renders
 // on the live line only: live updates carry the rising bar in the
-// DURATION↔MIN separator (column 48), the finalized line at status change
-// is a plain static line, and non-live output contains no frame glyphs at
-// all (user request 2026-08-17). The visible screen is asserted through
-// the terminal emulator — the raw stream contains every live redraw, so
+// DURATION padding (column 47), the finalized line at status change is a
+// plain static line, and non-live output contains no frame glyphs at all
+// (user request 2026-08-17). The visible screen is asserted through the
+// terminal emulator — the raw stream contains every live redraw, so
 // byte-level glyph checks would be wrong (DECISIONS #54 lesson).
 func TestLiveLineShowsAnimationFrame(t *testing.T) {
 	var buf bytes.Buffer
@@ -253,6 +253,9 @@ func TestLiveLineShowsAnimationFrame(t *testing.T) {
 		Duration: 2 * time.Second, Fails: 1,
 	}
 	d.Handle(downEv)
+	// The animation advances on the 1-second ticker, not per event.
+	d.Tick()
+	d.Tick()
 
 	scr := newTermScreen(10, 120)
 	scr.feed(buf.String())
@@ -265,11 +268,44 @@ func TestLiveLineShowsAnimationFrame(t *testing.T) {
 	if !strings.ContainsAny(scr.line(2), frames) {
 		t.Errorf("live line missing animation frame: %q", scr.line(2))
 	}
-	// The frame lives at column 48 (between DURATION and MIN).
+	// The frame lives at column 47 (inside the DURATION padding), and the
+	// separator at column 48 stays a space so it doesn't touch MIN.
 	if runes := []rune(scr.line(2)); len(runes) > 48 {
-		if c := runes[48]; !strings.ContainsRune(frames, c) {
-			t.Errorf("live frame not at column 48 (got %q): %q", c, scr.line(2))
+		if c := runes[47]; !strings.ContainsRune(frames, c) {
+			t.Errorf("live frame not at column 47 (got %q): %q", c, scr.line(2))
 		}
+		if c := runes[48]; c != ' ' {
+			t.Errorf("separator at col 48 = %q, want space: %q", c, scr.line(2))
+		}
+	}
+}
+
+// TestDisplayTickAdvancesFrame verifies the animation advances on the
+// 1-second ticker (user report 2026-08-17: per-event advancement is too
+// slow with a long --interval).
+func TestDisplayTickAdvancesFrame(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplay(&buf, false, false, true)
+	d.Handle(changeEvent(t0, state.StatusUp))
+
+	frames := []rune{'▁', '▃', '▅', '▇'}
+	for i := 0; i < 4; i++ {
+		buf.Reset()
+		d.Tick()
+		// Handle already rendered frame 0 (▁); ticks advance to
+		// ▃,▅,▇,▁.
+		if !strings.ContainsRune(buf.String(), frames[(i+1)%len(frames)]) {
+			t.Errorf("after Tick %d: missing frame %q in %q", i+1, frames[(i+1)%len(frames)], buf.String())
+		}
+	}
+	// Tick is a no-op when non-live: it must not add anything beyond the
+	// header Handle already wrote.
+	nl := newTestDisplay(&buf, false, false, false)
+	nl.Handle(changeEvent(t0, state.StatusUp))
+	before := buf.Len()
+	nl.Tick()
+	if buf.Len() != before {
+		t.Errorf("non-live Tick wrote output: %q", buf.String()[before:])
 	}
 }
 

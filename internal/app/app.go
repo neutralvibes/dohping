@@ -151,6 +151,18 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	sigCh, stopSig := signalx.Listen()
 	defer stopSig()
 
+	// The liveness animation advances on a fixed 1-second timer,
+	// independent of probe cadence: with a long --interval the probe
+	// events are rare, but the display must still visibly move every
+	// second (user report 2026-08-17). Piped/quiet runs have nothing to
+	// animate — the channel stays nil and the select case never fires.
+	var tickCh <-chan time.Time
+	if !opts.Quiet && (live || windowActive) {
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		tickCh = tick.C
+	}
+
 	// Interactive q-quit reader (raw stdin when a terminal).
 	keyCh := make(chan keyEvent, 1)
 	if tty.Stdin && tty.StdinFile != nil {
@@ -218,6 +230,8 @@ loop:
 			if wd, ok := disp.(*output.Window); ok {
 				wd.Redraw()
 			}
+		case <-tickCh:
+			disp.Tick()
 		}
 	}
 
@@ -244,6 +258,7 @@ loop:
 type displayer interface {
 	Handle(state.Event)
 	Finalize()
+	Tick()
 }
 
 // defaultHeightFn reads the terminal height from an *os.File writer

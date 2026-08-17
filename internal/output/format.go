@@ -120,11 +120,24 @@ func (l *Layout) formatLine(ln Line, frame rune) string {
 		fails = strconv.Itoa(ln.Fails)
 	}
 
+	durField := pad(dur, 14, false)
+	if frame != 0 {
+		// The liveness bar lives in the DURATION field's trailing padding
+		// (its last cell, column 47): durations are at most 11 chars
+		// ("98d 23:59:59"), so that cell is always whitespace, and MIN
+		// keeps its column. The bar therefore floats between DURATION and
+		// MIN with a space on each side (user correction 2026-08-17: it
+		// was glued to MIN at column 48).
+		r := []rune(durField)
+		r[13] = frame
+		durField = string(r)
+	}
+
 	fields := []string{
 		pad(ts, l.timeWidth, true),
 		pad(l.displayHost, l.hostWidth, false),
 		pad(status, 7, false),
-		pad(dur, 14, false),
+		durField,
 		pad(min, 7, false),
 		pad(max, 7, false),
 		pad(avg, 7, false),
@@ -139,12 +152,11 @@ func (l *Layout) formatLine(ln Line, frame rune) string {
 		}
 	}
 
-	sep := " "
-	if frame != 0 {
-		sep = string(frame)
-	}
+	// DURATION and MIN are joined by a plain space; the liveness bar is
+	// carried inside the DURATION field's padding (see above), never in
+	// this separator.
 	s := strings.Join([]string{
-		fields[0], "  ", fields[1], " ", fields[2], " ", fields[3], sep,
+		fields[0], "  ", fields[1], " ", fields[2], " ", fields[3], " ",
 		fields[4], " ", fields[5], " ", fields[6], " ", fields[7],
 	}, "")
 	return strings.TrimRight(s, " ")

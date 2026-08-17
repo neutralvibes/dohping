@@ -90,7 +90,7 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `264cdd86a958…` (2026-08-17, acceptance round 3: timestamp default intensity #58, liveness animation #59).
+- Current published linux-amd64 sha: `1b091ca0b953…` (2026-08-17, acceptance round 4: animation placement col 47 + 1s ticker #60).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works

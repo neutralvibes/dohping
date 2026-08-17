@@ -40,7 +40,6 @@ func NewDisplay(w io.Writer, layout *Layout, quiet, noHeader, live bool) *Displa
 		noHeader: noHeader,
 		live:     live,
 		now:      time.Now,
-		frame:    -1, // first event advances to frame 0 (lowest bar)
 	}
 }
 
@@ -69,7 +68,6 @@ func (d *Display) Handle(ev state.Event) {
 			Fails:  ev.Fails,
 		}
 		if d.live {
-			d.frame++
 			d.printLine(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)), true)
 		}
 	case state.EventProbeSuccess, state.EventProbeFailure, state.EventProbeError:
@@ -80,10 +78,22 @@ func (d *Display) Handle(ev state.Event) {
 		d.cur.Stats = ev.Stats
 		d.cur.Fails = ev.Fails
 		if d.live {
-			d.frame++
 			d.printLine(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)), true)
 		}
 	}
+}
+
+// Tick advances the liveness animation one frame and redraws the live
+// line in place. It is driven by a 1-second timer in the app loop,
+// INDEPENDENT of probe cadence: with a long --interval the probe events
+// are rare, but the animation must still visibly move every second (user
+// report 2026-08-17). No-op when quiet, non-live, or no current line.
+func (d *Display) Tick() {
+	if d.quiet || !d.live || d.cur == nil {
+		return
+	}
+	d.frame++
+	d.printLine(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)), true)
 }
 
 // finalizeLine prints the current line as finalized history when a status

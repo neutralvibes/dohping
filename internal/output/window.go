@@ -51,7 +51,6 @@ func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, hei
 		noHeader: noHeader,
 		heightFn: heightFn,
 		now:      time.Now,
-		frame:    -1, // first event advances to frame 0 (lowest bar)
 	}
 }
 
@@ -68,11 +67,13 @@ func (w *Window) Enter() {}
 func (w *Window) Exit() {}
 
 // Handle consumes one engine event (same semantics as Display.Handle).
+// The animation frame is NOT advanced here — it is driven by the 1-second
+// Tick timer so the block keeps moving even when probe events are rare
+// (long --interval; user report 2026-08-17).
 func (w *Window) Handle(ev state.Event) {
 	if w.quiet {
 		return
 	}
-	w.frame++ // liveness animation advances per probe event
 	switch ev.Kind {
 	case state.EventStatusChange, state.EventError:
 		w.finalizeLine(ev)
@@ -106,6 +107,17 @@ func (w *Window) Finalize() {
 	w.cur = nil
 	w.Redraw()
 	fmt.Fprint(w.w, "\r\n")
+}
+
+// Tick advances the liveness animation one frame and repaints the block.
+// Driven by the app loop's 1-second timer, independent of probe cadence
+// (user report 2026-08-17). No-op when quiet or no live line.
+func (w *Window) Tick() {
+	if w.quiet || w.cur == nil {
+		return
+	}
+	w.frame++
+	w.Redraw()
 }
 
 // Redraw repaints the window block in place. The block is always the same

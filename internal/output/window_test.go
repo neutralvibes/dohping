@@ -417,6 +417,8 @@ func TestWindowLiveRowAnimatedHistoryStatic(t *testing.T) {
 		Duration: 2 * time.Second, Fails: 1,
 	}
 	w.Handle(downEv)
+	// The animation advances on the 1-second ticker, not per event.
+	w.Tick()
 
 	scr := newTermScreen(10, 120)
 	scr.feed(buf.String())
@@ -429,10 +431,23 @@ func TestWindowLiveRowAnimatedHistoryStatic(t *testing.T) {
 	if !strings.ContainsAny(scr.line(2), frames) {
 		t.Errorf("live row missing animation frame: %q", scr.line(2))
 	}
-	// Column alignment: MIN still under its header (col 49) on the live
-	// row despite the frame at col 48.
-	live := scr.line(2)
-	if len(live) <= 49 || live[49] == 0 {
-		t.Errorf("live row too short for column check: %q", live)
+	// The frame lives at column 47 (inside the DURATION padding) and the
+	// separator at 48 stays a space — MIN keeps its column.
+	if runes := []rune(scr.line(2)); len(runes) > 48 {
+		if c := runes[47]; !strings.ContainsRune(frames, c) {
+			t.Errorf("live frame not at column 47 (got %q): %q", c, scr.line(2))
+		}
+		if c := runes[48]; c != ' ' {
+			t.Errorf("separator at col 48 = %q, want space: %q", c, scr.line(2))
+		}
+	}
+	// Tick advances the frame: another tick changes the glyph.
+	before := scr.line(2)
+	buf.Reset()
+	w.Tick()
+	scr2 := newTermScreen(10, 120)
+	scr2.feed(buf.String())
+	if scr2.line(2) == before {
+		t.Errorf("window Tick did not advance the animation frame")
 	}
 }
