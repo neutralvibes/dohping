@@ -53,6 +53,10 @@ never reach it. Use `--probe tcp` to probe with no ICMP dependency at all
 dohping [options] HOST
 ```
 
+Flags may appear before or after `HOST` (e.g. `dohping google.com -c 5`).
+`-i`/`-t` accept a bare number of seconds (`-i 5` = 5s, like ping) or a
+duration (`-t 500ms`).
+
 ```sh
 dohping 192.168.1.23              # default: ICMP, plain line mode
 dohping --probe tcp example.com   # TCP connect probe, no privileges

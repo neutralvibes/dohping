@@ -144,23 +144,28 @@ func TestFinalizeIdempotent(t *testing.T) {
 func TestLiveFinalizeStartsWithCarriageReturn(t *testing.T) {
 	// Regression: in live mode the cursor sits at the end of the last live
 	// update; the finalized line must start with \r or it concatenates onto
-	// the live line.
+	// the live line, and must END with \r\n (not bare \n) so the cursor
+	// lands at column 0 of the next line — otherwise whatever prints next
+	// (the exit summary) drifts right (user report 2026-08-17).
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, false, false, true)
 	d.Handle(changeEvent(t0, state.StatusUp))
 	d.Handle(successEvent(t0.Add(time.Second), state.StatusUp, state.Stats{Count: 1, Min: time.Millisecond, Max: time.Millisecond, Sum: time.Millisecond}, 0))
 	d.Finalize()
 	out := buf.String()
-	// The finalized line (after the last \r) must itself be \r-prefixed.
-	lastCR := strings.LastIndex(out, "\r")
+	// The finalized line must end with explicit CRLF, not bare LF.
+	if !strings.HasSuffix(out, "\r\n") {
+		t.Errorf("finalized line must end with \\r\\n: %q", out)
+	}
+	// The finalized line itself must be \r-prefixed (strip the trailing
+	// CRLF terminator, then the last \r starts the finalized line).
+	body := strings.TrimSuffix(out, "\r\n")
+	lastCR := strings.LastIndex(body, "\r")
 	if lastCR < 0 {
 		t.Fatalf("no carriage return in live output: %q", out)
 	}
-	if !strings.HasPrefix(out[lastCR:], "\r1") && !strings.HasPrefix(out[lastCR:], "\r0") {
+	if !strings.HasPrefix(body[lastCR:], "\r1") && !strings.HasPrefix(body[lastCR:], "\r0") {
 		t.Errorf("finalized line not \r-prefixed: %q", out)
-	}
-	if !strings.HasSuffix(out, "\n") {
-		t.Errorf("finalized line must end with newline: %q", out)
 	}
 }
 

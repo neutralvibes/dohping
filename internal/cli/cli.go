@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -99,6 +100,28 @@ type Options struct {
 	noWindowSet    bool
 }
 
+// secondsOrDuration implements flag.Value for interval/timeout flags:
+// it accepts either a bare number of seconds ("5" → 5s, matching ping's
+// `-i 5` convention) or a full Go duration string ("500ms", "1m30s").
+// "0" or a negative number parses and is then rejected by validation.
+type secondsOrDuration struct {
+	d *time.Duration
+}
+
+func (v secondsOrDuration) String() string { return v.d.String() }
+
+func (v secondsOrDuration) Set(s string) error {
+	if d, err := time.ParseDuration(s); err == nil {
+		*v.d = d
+		return nil
+	}
+	if n, err := strconv.ParseFloat(s, 64); err == nil && !math.IsNaN(n) && !math.IsInf(n, 0) {
+		*v.d = time.Duration(n * float64(time.Second))
+		return nil
+	}
+	return fmt.Errorf("expected a number of seconds (e.g. 5) or a duration like 5s or 1m30s, got %q", s)
+}
+
 // UsageError marks invalid usage; the caller maps it to exit code 2.
 type UsageError struct{ msg string }
 
@@ -137,10 +160,13 @@ func Parse(args []string) (*Options, Action, error) {
 	fs.BoolVar(&opts.Help, "help", false, "")
 	fs.BoolVar(&opts.Version, "V", false, "")
 	fs.BoolVar(&opts.Version, "version", false, "")
-	fs.DurationVar(&opts.Interval, "i", opts.Interval, "")
-	fs.DurationVar(&opts.Interval, "interval", opts.Interval, "")
-	fs.DurationVar(&opts.Timeout, "t", opts.Timeout, "")
-	fs.DurationVar(&opts.Timeout, "timeout", opts.Timeout, "")
+	// Interval/timeout accept either a bare number of seconds ("5" → 5s,
+	// matching ping's -i convention) or a Go duration string ("500ms",
+	// "1m30s") — see secondsOrDuration.
+	fs.Var(secondsOrDuration{&opts.Interval}, "i", "")
+	fs.Var(secondsOrDuration{&opts.Interval}, "interval", "")
+	fs.Var(secondsOrDuration{&opts.Timeout}, "t", "")
+	fs.Var(secondsOrDuration{&opts.Timeout}, "timeout", "")
 	fs.IntVar(&opts.Count, "c", 0, "")
 	fs.IntVar(&opts.Count, "count", 0, "")
 	fs.StringVar(&opts.Probe, "p", DefaultProbe, "")
@@ -169,11 +195,26 @@ func Parse(args []string) (*Options, Action, error) {
 	fs.StringVar(&opts.LogFile, "log-file", "", "")
 	fs.StringVar(&opts.LogFormat, "log-format", opts.LogFormat, "")
 
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return opts, ActionHelp, nil
+	// Parse with GNU-style flag permutation: flags may appear before or
+	// after the positional HOST. Go's flag package stops at the first
+	// non-flag argument, so parse iteratively — each round consumes
+	// flags up to the next positional, which is collected, then parsing
+	// continues with the remainder (user acceptance fix).
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return opts, ActionHelp, nil
+			}
+			return nil, ActionRun, usageErrorf("%v", err)
 		}
-		return nil, ActionRun, usageErrorf("%v", err)
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
 	}
 
 	// Track which conflict-relevant flags were explicitly set.
@@ -206,14 +247,13 @@ func Parse(args []string) (*Options, Action, error) {
 	}
 
 	// Positional HOST argument.
-	rest := fs.Args()
-	if len(rest) == 0 {
+	if len(positionals) == 0 {
 		return nil, ActionRun, usageErrorf("missing required HOST argument")
 	}
-	if len(rest) > 1 {
-		return nil, ActionRun, usageErrorf("too many arguments: unexpected %q (expected exactly one HOST)", rest[1])
+	if len(positionals) > 1 {
+		return nil, ActionRun, usageErrorf("too many arguments: unexpected %q (expected exactly one HOST)", positionals[1])
 	}
-	opts.Host = rest[0]
+	opts.Host = positionals[0]
 
 	if err := validate(opts); err != nil {
 		return nil, ActionRun, err

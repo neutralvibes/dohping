@@ -13,6 +13,8 @@ func WriteHelp(w io.Writer) {
 Usage:
   dohping [options] HOST
 
+Flags may appear before or after HOST (e.g. `+"`dohping HOST -c 5`"+`).
+
 Probe a single host and display its status as a compact, stateful view:
 current status, how long it has held, and RTT statistics — instead of an
 endless scroll of per-packet lines.
@@ -20,8 +22,10 @@ endless scroll of per-packet lines.
 Options:
   -h, --help                 Show this help and exit
   -V, --version              Show version information and exit
-  -i, --interval DURATION    Probe interval (default 1s)
-  -t, --timeout DURATION     Probe timeout (default 2s)
+  -i, --interval TIME        Probe interval: seconds (e.g. 5) or a
+                             duration (e.g. 500ms, 1m30s) (default 1s)
+  -t, --timeout TIME         Probe timeout: seconds (e.g. 5) or a
+                             duration (e.g. 500ms, 1m30s) (default 2s)
   -c, --count N              Stop after N probes (default: unlimited)
   -p, --probe TYPE           Probe type: icmp | tcp[:PORT]
                              (default icmp; tcp port default 443)

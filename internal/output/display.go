@@ -111,11 +111,14 @@ func (d *Display) Finalize() {
 
 // printFinalized writes a finalized line. In live mode the cursor sits at
 // the end of the last live update, so the line must be preceded by a
-// carriage return (plus clear-to-EOL to wipe any live residue); in
-// non-live mode it is plain newline-terminated output.
+// carriage return (plus clear-to-EOL to wipe any live residue); it must
+// also END with an explicit CRLF — a bare LF moves down but does not
+// reset the column, so whatever prints next (the exit summary) would
+// start mid-line and drift right (DECISIONS #54 lesson, user report
+// 2026-08-17). In non-live mode it is plain newline-terminated output.
 func (d *Display) printFinalized(s string) {
 	if d.live {
-		fmt.Fprintf(d.w, "\r%s\x1b[K\n", s)
+		fmt.Fprintf(d.w, "\r%s\x1b[K\r\n", s)
 		return
 	}
 	fmt.Fprintln(d.w, s)

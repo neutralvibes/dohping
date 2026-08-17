@@ -332,20 +332,27 @@ func logFinal(l *logx.Logger, host string, eng *state.Engine) {
 
 // printSummary renders the optional exit summary (spec §15.3), shown only
 // on interactive terminals so scripted/piped output stays parseable.
+//
+// Every line is \r-prefixed AND \r\n-terminated: after Finalize the
+// cursor may sit anywhere (live mode ends mid-line on terminals without
+// ONLCR), so each line explicitly resets to column 0 before writing and
+// lands at column 0 of the next line after (DECISIONS #54 lesson, user
+// report 2026-08-17 — the summary previously drifted progressively
+// right until the terminal wrapped).
 func printSummary(w io.Writer, host string, eng *state.Engine, runDuration time.Duration) {
 	probes, ok, fail := eng.Totals()
 	loss := 0.0
 	if probes > 0 {
 		loss = float64(fail) / float64(probes) * 100
 	}
-	fmt.Fprintln(w, "--- dohping summary ---")
-	fmt.Fprintf(w, "%-16s %s\n", "host:", host)
-	fmt.Fprintf(w, "%-16s %s\n", "current status:", eng.Status())
-	fmt.Fprintf(w, "%-16s %s\n", "run duration:", formatRunDuration(runDuration))
-	fmt.Fprintf(w, "%-16s %d\n", "total probes:", probes)
-	fmt.Fprintf(w, "%-16s %d\n", "successful:", ok)
-	fmt.Fprintf(w, "%-16s %d\n", "failed:", fail)
-	fmt.Fprintf(w, "%-16s %.2f%%\n", "loss:", loss)
+	fmt.Fprintf(w, "\r--- dohping summary ---\r\n")
+	fmt.Fprintf(w, "\r%-16s %s\r\n", "host:", host)
+	fmt.Fprintf(w, "\r%-16s %s\r\n", "current status:", eng.Status())
+	fmt.Fprintf(w, "\r%-16s %s\r\n", "run duration:", formatRunDuration(runDuration))
+	fmt.Fprintf(w, "\r%-16s %d\r\n", "total probes:", probes)
+	fmt.Fprintf(w, "\r%-16s %d\r\n", "successful:", ok)
+	fmt.Fprintf(w, "\r%-16s %d\r\n", "failed:", fail)
+	fmt.Fprintf(w, "\r%-16s %.2f%%\r\n", "loss:", loss)
 }
 
 func formatRunDuration(d time.Duration) string {

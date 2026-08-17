@@ -280,12 +280,89 @@ func TestNonConflicts(t *testing.T) {
 	mustParse(t, "--window", "--window-lines", "5", "h")
 }
 
-func TestHostBeforeFlags(t *testing.T) {
-	// Flag parsing stops at the first positional arg; anything after is
-	// treated as extra positional arguments.
-	ue := mustFail(t, "host", "--interval", "5s")
+func TestFlagsBeforeOrAfterHost(t *testing.T) {
+	// GNU-style permutation (user acceptance fix 2026-08-17): flags may
+	// appear on either side of the single positional HOST.
+	cases := [][]string{
+		{"host", "-c", "5"},
+		{"-c", "5", "host"},
+		{"host", "--interval", "5s", "-t", "3s"},
+		{"--interval", "5s", "-t", "3s", "host"},
+		{"host", "--window", "-c", "2"},
+		{"-c", "2", "host", "--window"},
+		{"example.com", "--probe", "tcp:8443", "-c", "1"},
+	}
+	for _, args := range cases {
+		opts := mustParse(t, args...)
+		if opts.Host != "host" && opts.Host != "example.com" {
+			t.Errorf("Parse(%q) Host = %q, want the positional", args, opts.Host)
+		}
+	}
+}
+
+func TestFlagsAfterHostStillValidates(t *testing.T) {
+	// Flags after the host are real flags, not extra positionals: they
+	// still get validated (conflicts, values).
+	ue := mustFail(t, "host", "--window-lines", "0")
+	if !strings.Contains(ue.Error(), "window-lines") {
+		t.Errorf("error = %q, want window-lines validation", ue.Error())
+	}
+	// Two positionals are still an error, wherever they sit.
+	ue = mustFail(t, "a", "b", "-c", "5")
 	if !strings.Contains(ue.Error(), "too many arguments") {
 		t.Errorf("error = %q, want too-many-arguments", ue.Error())
+	}
+	ue = mustFail(t, "-c", "5", "a", "b")
+	if !strings.Contains(ue.Error(), "too many arguments") {
+		t.Errorf("error = %q, want too-many-arguments", ue.Error())
+	}
+}
+
+func TestIntervalTimeoutAcceptsSeconds(t *testing.T) {
+	// Bare numbers are seconds (ping's -i convention), not a parse error.
+	opts := mustParse(t, "-i", "5", "h")
+	if opts.Interval != 5*time.Second {
+		t.Errorf("Interval = %v, want 5s", opts.Interval)
+	}
+	opts = mustParse(t, "--interval", "5", "h")
+	if opts.Interval != 5*time.Second {
+		t.Errorf("Interval = %v, want 5s", opts.Interval)
+	}
+	opts = mustParse(t, "-t", "3", "h")
+	if opts.Timeout != 3*time.Second {
+		t.Errorf("Timeout = %v, want 3s", opts.Timeout)
+	}
+	opts = mustParse(t, "--timeout", "3", "h")
+	if opts.Timeout != 3*time.Second {
+		t.Errorf("Timeout = %v, want 3s", opts.Timeout)
+	}
+	// Fractional seconds and full duration strings still work.
+	opts = mustParse(t, "-i", "0.5", "h")
+	if opts.Interval != 500*time.Millisecond {
+		t.Errorf("Interval = %v, want 500ms", opts.Interval)
+	}
+	opts = mustParse(t, "-i", "1m30s", "h")
+	if opts.Interval != 90*time.Second {
+		t.Errorf("Interval = %v, want 90s", opts.Interval)
+	}
+	opts = mustParse(t, "-i", "250ms", "h")
+	if opts.Interval != 250*time.Millisecond {
+		t.Errorf("Interval = %v, want 250ms", opts.Interval)
+	}
+}
+
+func TestIntervalSecondsAfterHost(t *testing.T) {
+	// The exact user invocation: `dohping HOST -i 5`.
+	opts := mustParse(t, "google.com", "-i", "5")
+	if opts.Host != "google.com" || opts.Interval != 5*time.Second {
+		t.Errorf("Host/Interval = %q/%v, want google.com/5s", opts.Host, opts.Interval)
+	}
+}
+
+func TestBadDurationMessage(t *testing.T) {
+	ue := mustFail(t, "-i", "nonsense", "h")
+	if !strings.Contains(ue.Error(), "number of seconds") {
+		t.Errorf("error = %q, want helpful duration hint", ue.Error())
 	}
 }
 
