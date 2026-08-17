@@ -309,6 +309,35 @@ func TestDisplayTickAdvancesFrame(t *testing.T) {
 	}
 }
 
+// TestDisplayTickRefreshesDuration: the 1-second tick must refresh
+// DURATION from the wall clock (now = t0+1min in the test display), so the
+// counter keeps moving between probe events — not just the animation
+// frame (user report 2026-08-17: duration did not update on the same
+// schedule as the animation).
+func TestDisplayTickRefreshesDuration(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplay(&buf, false, false, true) // live, now = t0+1min
+	d.Handle(changeEvent(t0, state.StatusUp))
+
+	// The first event line: duration from the probe event (0s).
+	if strings.Contains(buf.String(), "0d 00:01:00") {
+		t.Errorf("event line already shows tick duration: %q", buf.String())
+	}
+	// Tick: duration advances to the wall-clock value (1 min).
+	buf.Reset()
+	d.Tick()
+	if !strings.Contains(buf.String(), "0d 00:01:00") {
+		t.Errorf("tick did not refresh duration to 1m: %q", buf.String())
+	}
+	// Another tick (advance the injected clock) keeps it counting.
+	d.SetNow(func() time.Time { return t0.Add(2 * time.Minute) })
+	buf.Reset()
+	d.Tick()
+	if !strings.Contains(buf.String(), "0d 00:02:00") {
+		t.Errorf("tick did not advance duration to 2m: %q", buf.String())
+	}
+}
+
 func TestNonLiveNoAnimation(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, false, false, false) // non-live: finalized only

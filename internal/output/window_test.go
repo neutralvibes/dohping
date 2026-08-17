@@ -451,3 +451,19 @@ func TestWindowLiveRowAnimatedHistoryStatic(t *testing.T) {
 		t.Errorf("window Tick did not advance the animation frame")
 	}
 }
+
+// TestWindowTickRefreshesDuration: the 1-second tick must refresh the
+// live row's DURATION from the wall clock (now = t0+1min in the test
+// window), matching the plain display (user report 2026-08-17).
+func TestWindowTickRefreshesDuration(t *testing.T) {
+	var buf bytes.Buffer
+	w := newTestWindow(&buf, 5, false, false, 24) // now = t0+1min
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Tick()
+
+	scr := newTermScreen(10, 120)
+	scr.feed(buf.String())
+	if !strings.Contains(scr.line(1), "0d 00:01:00") {
+		t.Errorf("window tick did not refresh duration to 1m: %q", scr.line(1))
+	}
+}

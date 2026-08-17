@@ -83,15 +83,20 @@ func (d *Display) Handle(ev state.Event) {
 	}
 }
 
-// Tick advances the liveness animation one frame and redraws the live
-// line in place. It is driven by a 1-second timer in the app loop,
-// INDEPENDENT of probe cadence: with a long --interval the probe events
-// are rare, but the animation must still visibly move every second (user
-// report 2026-08-17). No-op when quiet, non-live, or no current line.
+// Tick advances the liveness animation one frame AND refreshes the
+// DURATION from the wall clock, then redraws the live line in place. It is
+// driven by a 1-second timer in the app loop, INDEPENDENT of probe
+// cadence: with a long --interval the probe events are rare, but the
+// display must still visibly move every second (user report 2026-08-17).
+// Duration is "how long has this status held" — wall-clock elapsed time,
+// which grows between probes; the event-based value is only a sample
+// (same math Finalize uses at shutdown, monotonic-safe per spec §20.4).
+// No-op when quiet, non-live, or no current line.
 func (d *Display) Tick() {
 	if d.quiet || !d.live || d.cur == nil {
 		return
 	}
+	d.cur.Duration = d.now().Sub(d.cur.Time)
 	d.frame++
 	d.printLine(d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)), true)
 }

@@ -109,13 +109,16 @@ func (w *Window) Finalize() {
 	fmt.Fprint(w.w, "\r\n")
 }
 
-// Tick advances the liveness animation one frame and repaints the block.
-// Driven by the app loop's 1-second timer, independent of probe cadence
-// (user report 2026-08-17). No-op when quiet or no live line.
+// Tick advances the liveness animation one frame, refreshes the live
+// line's DURATION from the wall clock (it grows between probe events),
+// and repaints the block. Driven by the app loop's 1-second timer,
+// independent of probe cadence (user report 2026-08-17). No-op when quiet
+// or no live line.
 func (w *Window) Tick() {
 	if w.quiet || w.cur == nil {
 		return
 	}
+	w.cur.Duration = w.now().Sub(w.cur.Time)
 	w.frame++
 	w.Redraw()
 }
