@@ -1,12 +1,14 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (54 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (63 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
 
-**Status: build complete. All 6 phases green. User acceptance fixes #50–54 shipped
-and user-verified for window mode (2026-08-17). The user is mid-testing; expect
-more acceptance reports.**
+**Status: build complete. All 6 phases green. Acceptance rounds 1–5 shipped
+(DECISIONS #50–61, 2026-08-17), the run-duration docs decision (#62), and the
+gosec security round (#63). User-verified so far: window mode in place, flags on
+either side of HOST, bare-seconds interval/timeout, clean exit summary, and the
+liveness animation. The user is mid-testing; expect more acceptance reports.**
 
 ---
 
@@ -31,6 +33,18 @@ and stage-marking; if in doubt, ASK, don't assume).
 - **Window mode** (`--window`, `--window-lines N`) — **user-confirmed working
   2026-08-17** after fixes #53/#54: renders IN PLACE on the normal terminal,
   no alternate screen, no screen clearing, block stays after exit, summary below.
+- **Flags on either side of HOST** (`dohping google.com -c 5` == `-c 5 google.com`)
+  — GNU-style permutation (#55). `--` still terminates flags.
+- **`-i`/`-t` accept bare seconds** (`-i 5` = 5s, ping convention) plus full
+  duration strings (`500ms`, `1m30s`) (#57). Zero/negative still rejected.
+- **Exit summary is a clean left-aligned block** at column 0 even on terminals
+  without ONLCR — explicit `\r` per line, `\r\n` terminators (#56).
+- **Liveness animation**: live line shows a rising bar `▁▃▅▇` in the DURATION
+  field's padding (column 47, floats between DURATION and MIN). Advances on a
+  fixed 1-SECOND timer independent of probe cadence, and the tick ALSO refreshes
+  DURATION from the wall clock (#59–61). Finalized/history/piped lines stay
+  plain (spec §7.4 byte-identical). Verified in PTY capture at `-i 5`.
+- **Timestamp at default intensity** (was dim) (#58).
 - **Three-tier ICMP**: raw socket → ping socket → system `ping`. Verified live:
   `1.1.1.1` up ~8ms, `::1` up (ICMPv6), `192.0.2.1` down (deterministic timeout).
 - **Error handling**: consecutive errors = one line, duration updates; permission
@@ -39,10 +53,10 @@ and stage-marking; if in doubt, ASK, don't assume).
 - **Cross-compile matrix**: linux/darwin/windows × amd64/arm64 in `dist/`,
   reproducible via `scripts/release.sh`.
 - **Gates**: 7/7 packages race-clean (`go test -race -count=1 ./...`),
-  gofmt/vet clean. golangci-lint + staticcheck were run at Phase 6 (installed
-  in ~/go/bin) — re-run them if the toolchain box changes.
+  gofmt/vet clean, golangci-lint + staticcheck + **gosec 2.28.0** all clean
+  (gosec round #63: log file now 0600; 2 justified `#nosec`).
 
-## 3. The five acceptance fixes (DECISIONS #50–54, all shipped)
+## 3. Acceptance fixes (DECISIONS #50–63, all shipped)
 
 | # | Fix | User report it answered |
 |---|---|---|
@@ -51,18 +65,30 @@ and stage-marking; if in doubt, ASK, don't assume).
 | 52 | MIN/MAX/AVG/FAILS left-aligned under headers | "MIN, MAX and AVG columns are not in place" |
 | 53 | Window mode in place on normal terminal, no alt-screen/clear | "nothing about clearing the screen... at place at the screen" |
 | 54 | Explicit column reset: `\x1b[<n>A\r` on redraw, `\r\n` between rows | fragmented rows (`348.00 348.00 348.00` / repeated headers) |
+| 55 | Flags on either side of HOST (GNU-style permutation) | "options/flags should be placeable either side of a ping target" |
+| 56 | Live finalize ends `\r\n`; exit summary `\r`-prefixed + `\r\n`-terminated | "once the time is up it loses formatting" |
+| 57 | `-i`/`-t` accept bare seconds + duration strings, helpful error hint | "`--interval 5` / `-i 5`: parse error" |
+| 58 | Timestamp at default intensity (was dim) | "color selected for time field is a bit dim" |
+| 59–61 | Liveness animation: rising bar `▁▃▅▇` at col 47, 1s ticker independent of probe cadence, tick refreshes DURATION | "needs something more visible to show it is working" / "blocks are not appearing in the right place" / "display needs to run every second" / "why doesn't duration update on the same schedule?" |
+| 62 | Docs: README "Timing model" note (first probe immediate; duration measured) | "it feels like it should be 5 secs… needs a value + 1" (rejected — see DECISIONS) |
+| 63 | gosec 2.28.0 clean: log 0600, TCP close discarded, 2 justified `#nosec` | "we need gosec" |
 
 ## 4. Pending / next actions
 
 - **User is still testing** — no outstanding agent tasks. If the user reports
   another acceptance issue: reproduce, fix, add regression test, re-run gates,
   rebuild `dist/` via `scripts/release.sh`, republish to the rig (§6), record
-  DECISIONS + CHECKPOINT entries.
+  DECISIONS + CHECKPOINT entries, commit.
+- **Animation is user-testing territory**: the rising-bar placement (col 47) and
+  the 1-second ticker were both corrected after user reports — if placement or
+  cadence comes up again, verify against the rendered-screen tests first.
 - Areas the user has NOT explicitly verified yet (candidates to probe if asked):
-  TCP probe mode (`-p tcp`), `--log-file` output, `--timestamp-format rfc3339`,
-  terminal-resize behavior in window mode, the darwin/windows binaries (built
-  but never run on those OSes — Windows signal codes are documented as
-  closest-conventional, spec §18).
+  TCP probe mode (`-p tcp`), `--log-file` output (now 0600 — user may notice),
+  `--timestamp-format rfc3339`, terminal-resize behavior in window mode, the
+  darwin/windows binaries (built but never run on those OSes — Windows signal
+  codes are documented as closest-conventional, spec §18).
+- Proposed but not done: adding gosec to `scripts/release.sh` as an automatic
+  gate (user hasn't answered the offer).
 
 ## 5. Environment (critical — read before running anything)
 
@@ -103,8 +129,18 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   RENDER the stream through a terminal emulator and assert the visible screen
   (the `termScreen` in `internal/output/window_test.go` does this) — escape-list
   assertions are not enough.
+- The user's terminal does NOT apply ONLCR: exit-summary drift (#56) and the
+  window column bug (#54) both only reproduced when rendering through a
+  no-ONLCR emulator (`noOnlcrScreen` in `internal/app/app_test.go`). Any new
+  terminal-output change should be asserted through BOTH the plain termScreen
+  and, where line-column drift is possible, the no-ONLCR one.
+- Animation tests: the live-line frame lives at column 47 and advances on the
+  1-second `Tick()` (driven by the app loop's timer, not probe events) — unit
+  tests drive `Tick()` directly with an injected clock; the rendered-screen
+  assertions in `display_test.go`/`window_test.go` cover placement and
+  history-vs-live separation.
 - Regression tests must accompany every acceptance fix (that's the established
-  pattern, #50–54 all have them).
+  pattern, #50–63 all have them).
 
 ## 8. Project conventions (user's way of working)
 
