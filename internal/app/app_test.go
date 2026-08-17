@@ -165,7 +165,7 @@ func (s *noOnlcrScreen) line(r int) string {
 func TestExitSummaryRenderedAtColumnZero(t *testing.T) {
 	var buf bytes.Buffer
 	layout := output.NewLayout("google.com", "HH:MM:SS", nil)
-	d := output.NewDisplay(&buf, layout, false, false, true) // live
+	d := output.NewDisplay(&buf, layout, false, false, true, nil) // live
 	d.SetNow(func() time.Time { return t0.Add(time.Minute) })
 
 	// A status change + probe successes (the -c N run), then shutdown.

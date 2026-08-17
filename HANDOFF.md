@@ -1,16 +1,17 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (64 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (65 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
 
-**Status: build complete. All 6 phases green. Acceptance rounds 1–6 shipped
-(DECISIONS #50–64, 2026-08-17), including the run-duration docs decision
-(#62), the gosec security round (#63), and the terminal-resize round
-(#64). User-verified so far: window mode in place, flags on either side
-of HOST, bare-seconds interval/timeout, clean exit summary, and the
-liveness animation. The resize fix (#64) is shipped and awaiting the
-user's own terminal test; expect more acceptance reports.**
+**Status: build complete. All 6 phases green. Acceptance rounds 1–7 shipped
+(DECISIONS #50–65, 2026-08-17), including the run-duration docs decision
+(#62), the gosec security round (#63), the window-mode terminal-resize
+round (#64), and the plain-mode live-line resize round (#65). User-verified
+so far: window mode in place, flags on either side of HOST, bare-seconds
+interval/timeout, clean exit summary, the liveness animation, and the
+window-mode resize fix. The plain-mode resize fix (#65) is shipped and
+awaiting the user's own terminal test; expect more acceptance reports.**
 
 ---
 
@@ -75,6 +76,7 @@ and stage-marking; if in doubt, ASK, don't assume).
 | 62 | Docs: README "Timing model" note (first probe immediate; duration measured) | "it feels like it should be 5 secs… needs a value + 1" (rejected — see DECISIONS) |
 | 63 | gosec 2.28.0 clean: log 0600, TCP close discarded, 2 justified `#nosec` | "we need gosec" |
 | 64 | Terminal resize handled, platform-split: HOST elastic column (content-fit, terminal-capped, min 15 max 40, `…`), rune-based cell math, window re-measures every redraw, PHYSICAL-row cursor math (wrapped blocks stay coherent); Unix SIGWINCH fast path, Windows self-heals via the 1s tick | "Not handling terminal resize - breaks output" + "must be handled based on platform" |
+| 65 | Plain live line width-aware: same physical-row primitive reduced to one row — lastPhysRows + walk-back + defensive clear (live rewrite AND finalize); HOST stays fixed (scrollback consistency); piped/--no-live untouched; plain mode gains SIGWINCH fast path. Latent fix: stale-clear resets column (`\x1b[1B\r\x1b[K`) — cursor-down preserves the column, so non-blank last rows left stale text (window full-block case too) | "plain mode also needs to be width aware for the current live line only" + user's lastPhysRows design |
 
 ## 4. Pending / next actions
 
@@ -85,15 +87,13 @@ and stage-marking; if in doubt, ASK, don't assume).
 - **Animation is user-testing territory**: the rising-bar placement (col 47) and
   the 1-second ticker were both corrected after user reports — if placement or
   cadence comes up again, verify against the rendered-screen tests first.
-- **Resize is user-testing territory**: the #64 design (HOST column
-  retraction/expansion, `…` truncation at min width, below-floor wrap staying
-  coherent) was proven in-unit and in a real PTY (scripts/pty-resize-probe.py),
-  but only the user's terminal is the final acceptance gate. If a resize report
-  comes back, re-verify against the width-injected window tests first.
-- Known, accepted limitation (DECISIONS #64): **plain-line live mode** leaves
-  wrap residue on the live line when the terminal shrinks below the line width
-  (scrolling output; cosmetic until the next status change). Not fixed — the
-  report was about window mode; offer as a follow-up if the user cares.
+- **Resize is user-testing territory**: the #64/#65 design (HOST column
+  retraction/expansion, `…` truncation at min width, below-floor wrap
+  staying coherent, plain live line staying anchored) was proven in-unit
+  and in a real PTY (scripts/pty-resize-probe.py — `window` and `plain`
+  scenarios), but only the user's terminal is the final acceptance gate.
+  If a resize report comes back, re-verify against the width-injected
+  window/display tests first.
 - Areas the user has NOT explicitly verified yet (candidates to probe if asked):
   TCP probe mode (`-p tcp`), `--log-file` output (now 0600 — user may notice),
   `--timestamp-format rfc3339`, the darwin/windows binaries (built but never run
@@ -129,7 +129,7 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `a384b1270dc4…` (2026-08-17, resize round #64; served = dist, verified byte-identical over TLS).
+- Current published linux-amd64 sha: `6b54a2e58039…` (2026-08-17, plain-mode round #65; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works
@@ -156,12 +156,15 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   DECAWM autowrap) and assert the visible grid at 120/81/60 cols — expansion,
   retraction, `…` truncation, below-floor wrap coherence, stale-row clearing.
 - **Real-PTY resize proof**: `python3 scripts/pty-resize-probe.py` spawns the
-  built binary in a 60-col pty, resizes it to 100 mid-run (TIOCSWINSZ →
-  SIGWINCH), and renders the capture through a VT emulator, printing the
-  visible screen + cursor-up/shrink-clear sequence counts. Run it against a
-  FRESH build (`rm -f` the output first — stale-build trap).
+  built binary in a pty and renders the capture through a VT emulator,
+  printing the visible screen + cursor-up/shrink-clear counts. Scenarios:
+  `window` (60-col pty, mid-run TIOCSWINSZ 60→100 via SIGWINCH — proves the
+  block re-anchors and clears stale rows) and `plain` (fixed 60-col pty —
+  asserts the live line stays anchored at row 2 across a multi-second run,
+  the #65 regression). Run it against a FRESH build (`rm -f` the output
+  first — stale-build trap).
 - Regression tests must accompany every acceptance fix (that's the established
-  pattern, #50–64 all have them).
+  pattern, #50–65 all have them).
 
 ## 8. Project conventions (user's way of working)
 
