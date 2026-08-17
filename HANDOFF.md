@@ -18,8 +18,11 @@ pronounced "dopping". Monitors one host with ICMP (raw → unprivileged ping soc
 hysteresis and RTT stats, renders plain-line or fixed window mode, optional
 text/JSON logging, interactive `q` quit, predictable exit codes.
 
-Project dir: `/home/hermes/.hermes/user/projects/dohping` (NOT a git repo —
-see §8).
+Project dir: `/home/hermes/.hermes/user/projects/dohping` — **git repo** (baseline
+`1e4a96e`, identity `Hermes Agent <hermes@hermes.home>`, branch `master`). Commit at
+every stage/acceptance fix; use git to reverse changes when required (user's
+stated expectation — the build process was delegated with git for reversibility
+and stage-marking; if in doubt, ASK, don't assume).
 
 ## 2. Verified working (user-confirmed or gate-proven)
 
@@ -60,8 +63,6 @@ see §8).
   terminal-resize behavior in window mode, the darwin/windows binaries (built
   but never run on those OSes — Windows signal codes are documented as
   closest-conventional, spec §18).
-- Not a git repo — the rig config dirs are git-baselined but this project tree
-  isn't. Ask before init-ing.
 
 ## 5. Environment (critical — read before running anything)
 
@@ -109,6 +110,10 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - **Spec-first, no drive-by fixes**: every change traces to the spec or an
   explicit user report, recorded in `DECISIONS.md` with rationale, and gates are
   re-run. `CHECKPOINT.md` rewritten at phase/acceptance boundaries.
+- **Git discipline**: commit at every stage and acceptance fix (baseline
+  `1e4a96e`); `dist/` and `.notify-state` are ignored. If a step is genuinely
+  ambiguous, ASK — the user delegated the build but expects questions, not
+  assumptions.
 - User wants genuine pushback and the sober voice: say what pays AND what doesn't.
 - Do not commit taste decisions to memory/vault/skills without asking.
 - User's direct experimental evidence is ground truth — don't re-litigate settled
