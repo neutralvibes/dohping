@@ -65,6 +65,11 @@ dohping -q -l events.log host     # quiet + append status events to a log
 dohping -c 5 host                 # scripted: exactly 5 probes, exit 0
 ```
 
+Timing model: the first probe fires immediately, then probes start one
+`--interval` apart — so `-c 5 -i 1` completes in about 4 seconds
+(5 probes, 4 gaps), exactly like `ping -c 5 -i 1`. The summary's
+`run duration` is measured wall-clock time, not `count × interval`.
+
 ## Display modes
 
 ### Plain line mode (default)
