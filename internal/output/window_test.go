@@ -11,9 +11,25 @@ import (
 )
 
 func newTestWindow(buf *bytes.Buffer, lines int, quiet, noHeader bool, height int) *Window {
-	w := NewWindow(buf, plainLayout("192.168.1.23"), lines, quiet, noHeader, func() int { return height })
+	// Width 0 = unknown (startup column policy) — the pre-resize behavior.
+	return newTestWindowSized(buf, lines, quiet, noHeader, 0, height)
+}
+
+// newTestWindowSized injects a fixed terminal size. width 0 = unknown.
+func newTestWindowSized(buf *bytes.Buffer, lines int, quiet, noHeader bool, width, height int) *Window {
+	w := NewWindow(buf, plainLayout("192.168.1.23"), lines, quiet, noHeader, func() (int, int) { return width, height })
 	w.SetNow(func() time.Time { return t0.Add(time.Minute) })
 	return w
+}
+
+// newTestWindowResizable injects a MUTABLE terminal size: tests simulate a
+// resize by changing the captured variables between redraws. The closure
+// captures the parameter variables themselves, so mutating the returned
+// pointers changes what the next Redraw sees.
+func newTestWindowResizable(buf *bytes.Buffer, host string, lines int, quiet, noHeader bool, width, height int) (*Window, *int, *int) {
+	w := NewWindow(buf, plainLayout(host), lines, quiet, noHeader, func() (int, int) { return width, height })
+	w.SetNow(func() time.Time { return t0.Add(time.Minute) })
+	return w, &width, &height
 }
 
 // cursorUpRe matches in-place redraw markers: \x1b[<n>A (cursor up).
@@ -114,6 +130,17 @@ func (t *termScreen) feed(s string) {
 		case ch < 0x20:
 			i++ // other control: ignore
 		default:
+			// DECAWM-style autowrap: at the right margin the next cell starts
+			// a new physical row (proves below-floor wrap behavior — DECISIONS
+			// #64). Placement is identical to a real terminal for the
+			// sequences dohping emits.
+			if t.c >= t.cols {
+				t.r++
+				if t.r >= t.rows {
+					t.r = t.rows - 1
+				}
+				t.c = 0
+			}
 			// decode the rune
 			r, size := decodeRune(s[i:])
 			if t.r < t.rows && t.c < t.cols {
@@ -465,5 +492,168 @@ func TestWindowTickRefreshesDuration(t *testing.T) {
 	scr.feed(buf.String())
 	if !strings.Contains(scr.line(1), "0d 00:01:00") {
 		t.Errorf("window tick did not refresh duration to 1m: %q", scr.line(1))
+	}
+}
+
+// statusCol returns the column where the status value starts on the given
+// rendered row: TIME(8) + 2sp + HOST(hostWidth) + 1sp.
+func statusCol(hostWidth int) int { return 8 + 2 + hostWidth + 1 }
+
+// TestWindowResizeRetractsHostColumn: on a narrow terminal the HOST column
+// retracts to fit (content-fit with terminal cap — user-approved
+// 2026-08-17), the STATUS column follows, and growing back restores the
+// original columns. Rendered through the emulator at both widths.
+func TestWindowResizeRetractsHostColumn(t *testing.T) {
+	var buf bytes.Buffer
+	// "frigate.app.home" is 16 cells → column 16 at startup.
+	w, wPtr, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 120, 24)
+	*wPtr = 120
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+
+	// Wide terminal: HOST keeps its content width (16), STATUS at col 27.
+	scr := newTermScreen(24, 120)
+	scr.feed(buf.String())
+	if runes := []rune(scr.line(1)); runes[statusCol(16)] != 'u' {
+		t.Errorf("wide: status not at col %d: %q", statusCol(16), scr.line(1))
+	}
+
+	// Shrink to 81 (the minimum floor): HOST retracts to 15, STATUS moves
+	// to col 26, and the line still fits — no wrap at the minimum.
+	*wPtr = 81
+	w.Tick()
+	scr = newTermScreen(24, 81)
+	scr.feed(buf.String())
+	if runes := []rune(scr.line(1)); runes[statusCol(15)] != 'u' {
+		t.Errorf("narrow: status not at col %d: %q", statusCol(15), scr.line(1))
+	}
+	for r := 6; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("narrow: row %d not blank (block should be 6 rows at min width): %q", r, got)
+		}
+	}
+
+	// Grow back to 120: columns restore, screen stays clean.
+	*wPtr = 120
+	w.Tick()
+	scr = newTermScreen(24, 120)
+	scr.feed(buf.String())
+	if runes := []rune(scr.line(1)); runes[statusCol(16)] != 'u' {
+		t.Errorf("grow-back: status not at col %d: %q", statusCol(16), scr.line(1))
+	}
+	for r := 6; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("grow-back: row %d not blank: %q", r, got)
+		}
+	}
+}
+
+// TestWindowResizeMinWidthTruncatesHost: at the 81-cell minimum the HOST
+// column is 15 cells and a long host shows the ellipsis; the truncation is
+// cell-exact (rune-based, DECISIONS #64) so STATUS stays at col 26.
+func TestWindowResizeMinWidthTruncatesHost(t *testing.T) {
+	var buf bytes.Buffer
+	w := newTestWindowSized(&buf, 5, false, false, 81, 24)
+	w.layout = NewLayout("a-very-long-hostname.internal", "HH:MM:SS", nil) // 29 cells
+	w.Handle(changeEvent(t0, state.StatusUp))
+
+	scr := newTermScreen(24, 81)
+	scr.feed(buf.String())
+	row := scr.line(1)
+	if !strings.Contains(row, "…") {
+		t.Errorf("long host not truncated at min width: %q", row)
+	}
+	runes := []rune(row)
+	// 14 cells of host + ellipsis fills the 15-wide field exactly.
+	if string(runes[10:24]) != "a-very-long-ho" {
+		t.Errorf("host prefix wrong: %q", string(runes[10:24]))
+	}
+	if runes[24] != '…' {
+		t.Errorf("ellipsis not at col 24: %q", row)
+	}
+	if runes[statusCol(15)] != 'u' {
+		t.Errorf("status not at col %d after truncation: %q", statusCol(15), row)
+	}
+}
+
+// TestWindowResizeBelowFloorWrapsCoherently is the regression test for the
+// reported bug: a terminal narrower than the 81-cell minimum wraps every
+// line, and the block must repaint as a coherent stack — one header, one
+// live line, no interleaved fragments — even across repeated redraws.
+// The old code counted LOGICAL rows for cursor movement, so a wrapped
+// block's cursor-up landed mid-block and rows overwrote each other.
+func TestWindowResizeBelowFloorWrapsCoherently(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	w.Tick() // a third frame: cumulative drift must not appear
+
+	scr := newTermScreen(24, 60)
+	scr.feed(buf.String())
+
+	// Exactly one header, exactly one live line, nothing interleaved.
+	if !strings.HasPrefix(scr.line(0), "TIME") {
+		t.Errorf("row 0 must be the header: %q", scr.line(0))
+	}
+	if got := strings.Count(strings.Join(screenRows(scr), "\n"), "TIME"); got != 1 {
+		t.Errorf("header appears %d times (fragmentation): rows %q", got, screenRows(scr))
+	}
+	if !strings.HasPrefix(scr.line(2), "11:00:35") {
+		t.Errorf("live line must start at row 2 col 0 (wrapped after the header): row2=%q", scr.line(2))
+	}
+	// No repeated rows stacked on one screen line (the old bug signature:
+	// "down ... 1      15:54:45 ... down" fragments on a single row).
+	for r := 0; r < scr.rows; r++ {
+		if strings.Count(scr.line(r), "11:00:35") > 1 {
+			t.Errorf("row %d carries two timestamps (interleaved rows): %q", r, scr.line(r))
+		}
+	}
+
+	// One more redraw must leave the same coherent screen (no cumulative
+	// drift — the old bug got worse with every repaint).
+	buf.Reset()
+	w.Tick()
+	scr2 := newTermScreen(24, 60)
+	scr2.feed(buf.String())
+	if !strings.HasPrefix(scr2.line(0), "TIME") || !strings.HasPrefix(scr2.line(2), "11:00:35") {
+		t.Errorf("repeat redraw broke coherence: rows %q", screenRows(scr2))
+	}
+}
+
+// screenRows renders all rows of a termScreen joined by newlines.
+func screenRows(scr *termScreen) []string {
+	rows := make([]string, scr.rows)
+	for r := range rows {
+		rows[r] = scr.line(r)
+	}
+	return rows
+}
+
+// TestWindowResizeGrowBackClearsStaleRows: growing the terminal back after
+// a narrow (wrapped) frame must clear the wrapped tails left below the
+// block — the user's "going back to original width restores it" becomes
+// automatic. The shrink-clear runs on PHYSICAL row counts.
+func TestWindowResizeGrowBackClearsStaleRows(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp)) // wrapped: 8 physical rows
+
+	*wPtr = 120
+	w.Tick() // unwrapped: 6 physical rows → 2 stale rows must be cleared
+
+	scr := newTermScreen(24, 120)
+	scr.feed(buf.String())
+	if runes := []rune(scr.line(1)); runes[statusCol(16)] != 'u' {
+		t.Errorf("grow-back: status not at col %d: %q", statusCol(16), scr.line(1))
+	}
+	for r := 6; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not cleared after grow-back (stale wrap tail): %q", r, got)
+		}
 	}
 }

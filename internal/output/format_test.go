@@ -236,6 +236,114 @@ func TestFullWidthStable(t *testing.T) {
 	}
 }
 
+func TestLayoutResizeContentFit(t *testing.T) {
+	// HOST is content-fit with a terminal cap (DECISIONS #64,
+	// user-approved 2026-08-17): as wide as the host's own length (clamped
+	// to [15, 40]) but never wider than the terminal leaves after the
+	// fixed columns; the floor is 15 and unknown width changes nothing.
+	l := NewLayout("google.com", "HH:MM:SS", nil) // 10 cells → min 15
+	if l.hostWidth != 15 {
+		t.Fatalf("short host width = %d, want 15", l.hostWidth)
+	}
+	l.Resize(200) // wide terminal: short host stays compact
+	if l.hostWidth != 15 {
+		t.Errorf("Resize(200) = %d, want 15 (content-fit)", l.hostWidth)
+	}
+	l.Resize(0) // unknown width: no change
+	if l.hostWidth != 15 {
+		t.Errorf("Resize(0) = %d, want 15 (unchanged)", l.hostWidth)
+	}
+
+	l2 := NewLayout("a-very-long-hostname.internal", "HH:MM:SS", nil) // 29
+	if l2.hostWidth != 29 {
+		t.Fatalf("long host width = %d, want 29", l2.hostWidth)
+	}
+	l2.Resize(200) // room: content wins
+	if l2.hostWidth != 29 {
+		t.Errorf("Resize(200) = %d, want 29", l2.hostWidth)
+	}
+	l2.Resize(90) // only 24 left → capped
+	if l2.hostWidth != 24 {
+		t.Errorf("Resize(90) = %d, want 24 (terminal cap)", l2.hostWidth)
+	}
+	l2.Resize(81) // exactly the minimum
+	if l2.hostWidth != 15 {
+		t.Errorf("Resize(81) = %d, want 15 (floor)", l2.hostWidth)
+	}
+	if l2.displayHost != "a-very-long-ho…" {
+		t.Errorf("displayHost after floor resize = %q, want 14 cells + ellipsis", l2.displayHost)
+	}
+	l2.Resize(80) // below the floor: NO further retraction
+	if l2.hostWidth != 15 {
+		t.Errorf("Resize(80) = %d, want 15 (no retraction below min)", l2.hostWidth)
+	}
+
+	l3 := NewLayout(strings.Repeat("x", 41), "HH:MM:SS", nil) // > 40 → cap
+	if l3.hostWidth != 40 {
+		t.Fatalf("41-char host width = %d, want 40", l3.hostWidth)
+	}
+	l3.Resize(100) // 34 left → capped by the terminal
+	if l3.hostWidth != 34 {
+		t.Errorf("Resize(100) = %d, want 34", l3.hostWidth)
+	}
+	l3.Resize(70) // 4 left → floor
+	if l3.hostWidth != 15 {
+		t.Errorf("Resize(70) = %d, want 15", l3.hostWidth)
+	}
+}
+
+func TestRuneBasedCellWidth(t *testing.T) {
+	// cellWidth is the display-cell width: runes minus ANSI escape
+	// sequences (SGR colors add bytes, not cells) — the exact measure the
+	// window renderer's wrap math needs (DECISIONS #64).
+	cases := []struct {
+		s    string
+		want int
+	}{
+		{"11:00:35  192.168.1.23    up", 28},
+		{"…", 1},
+		{"▁▃▅▇", 4},
+		{"\x1b[1mab\x1b[0m", 2}, // colored: 2 cells
+		{"münchen", 7},          // multibyte: 7 cells
+	}
+	for _, c := range cases {
+		if got := cellWidth(c.s); got != c.want {
+			t.Errorf("cellWidth(%q) = %d, want %d", c.s, got, c.want)
+		}
+	}
+}
+
+func TestPadIsRuneBased(t *testing.T) {
+	// Padding is computed in cells (runes), so multibyte content never
+	// shifts columns; pad never truncates.
+	if got := pad("…", 3, false); got != "…  " {
+		t.Errorf("pad(…,3,left) = %q", got)
+	}
+	if got := pad("x", 3, true); got != "  x" {
+		t.Errorf("pad(x,3,right) = %q", got)
+	}
+	if got := pad("long", 2, false); got != "long" {
+		t.Errorf("pad must not truncate: %q", got)
+	}
+}
+
+func TestTruncateHostRuneBased(t *testing.T) {
+	// Byte-slicing would cut mid-rune and misalign the column; rune-slicing
+	// keeps the field exactly w cells (DECISIONS #64).
+	if got := truncateHost("münchen.example.com", 6); got != "münch…" {
+		t.Errorf("truncateHost(6) = %q, want münch…", got)
+	}
+	if got := truncateHost("abc", 5); got != "abc" {
+		t.Errorf("truncateHost short = %q, want abc", got)
+	}
+	if got := truncateHost("abcdef", 6); got != "abcdef" {
+		t.Errorf("exactly-w host must not truncate: %q", got)
+	}
+	if got := truncateHost("abcdef", 5); got != "abcd…" {
+		t.Errorf("truncateHost(5) = %q, want abcd…", got)
+	}
+}
+
 func TestLiveLineAnimationFrame(t *testing.T) {
 	// The liveness animation occupies the last cell of the DURATION
 	// field's padding (column 47): finalized lines keep a plain space

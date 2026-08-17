@@ -9,13 +9,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"dohping/internal/state"
 	"dohping/internal/theme"
 )
 
-// Column width policy (spec §9.4 + DECISIONS): HOST computed once at
-// startup (min 15, max 40, truncate with …), DURATION capped at 99d+.
+// Column width policy (spec §9.4 + DECISIONS): HOST is the elastic
+// column — computed from the host at startup (min 15, max 40, truncated
+// with …) and re-computed on terminal resize (DECISIONS #64: it expands
+// to fill available width up to the max, and retracts to the min rather
+// than letting the line wrap). DURATION capped at 99d+.
 // Column starts (verified against the spec §7.4 header):
 //
 //	0        10       26       34       49       57       65       73
@@ -26,9 +30,11 @@ const (
 	durCap       = 99 * 24 * time.Hour
 )
 
-// Layout computes column widths once per run (single host, fixed formats)
-// and renders header and lines.
+// Layout computes column widths and renders header and lines. Widths are
+// cell counts (runes), never bytes — multibyte glyphs (…, the animation
+// bars, non-ASCII hosts) must not shift columns (DECISIONS #64).
 type Layout struct {
+	host        string // raw target (for re-truncation on resize)
 	hostWidth   int
 	displayHost string // host truncated to hostWidth with …
 	timeFormat  string
@@ -39,24 +45,74 @@ type Layout struct {
 // NewLayout builds a layout for the given display host and timestamp
 // format. th may be nil for a plain (uncolored) layout.
 func NewLayout(host, timeFormat string, th *theme.Renderer) *Layout {
-	w := len(host)
+	tw := 8 // HH:MM:SS
+	if timeFormat == "rfc3339" {
+		tw = 25 // 2026-08-16T13:34:11+01:00
+	}
+	l := &Layout{
+		host:       host,
+		timeFormat: timeFormat,
+		timeWidth:  tw,
+		theme:      th,
+	}
+	l.setHostWidth(hostWidthFor(host))
+	return l
+}
+
+// fixedWidth is the width of everything except HOST (the fixed columns +
+// separators) — the part of the line that never flexes. This must stay in
+// sync with the join in formatLine: TIME + 2sp + STATUS(7) + 1sp +
+// DURATION(14) + 1sp + MIN(7) + 1sp + MAX(7) + 1sp + AVG(7) + 1sp +
+// FAILS(8) = timeWidth + 58.
+func (l *Layout) fixedWidth() int { return l.timeWidth + 58 }
+
+// Resize re-computes the HOST column for a terminal of the given width
+// (cells). HOST is the elastic column (DECISIONS #64, user-approved
+// 2026-08-17): content-fit with a terminal cap — as wide as the host's
+// own length (clamped to spec §9.4's [15, 40]) but never wider than the
+// terminal leaves after the fixed columns. Short hosts stay compact; long
+// hosts expand when room exists; a narrow terminal forces the column to
+// retract rather than wrap. The floor is minHostWidth — below it the line
+// simply cannot fit and wraps (documented limitation, DECISIONS #64).
+// width ≤ 0 (unknown) leaves the layout unchanged.
+func (l *Layout) Resize(width int) {
+	if width <= 0 {
+		return
+	}
+	w := hostWidthFor(l.host)
+	if avail := width - l.fixedWidth(); avail < w {
+		w = avail
+	}
 	if w < minHostWidth {
 		w = minHostWidth
 	}
 	if w > maxHostWidth {
 		w = maxHostWidth
 	}
-	tw := 8 // HH:MM:SS
-	if timeFormat == "rfc3339" {
-		tw = 25 // 2026-08-16T13:34:11+01:00
+	l.setHostWidth(w)
+}
+
+// setHostWidth applies a new HOST column width and re-truncates the
+// display host. No-op when the width is unchanged (avoids re-slicing).
+func (l *Layout) setHostWidth(w int) {
+	if w == l.hostWidth {
+		return
 	}
-	return &Layout{
-		hostWidth:   w,
-		displayHost: truncateHost(host, w),
-		timeFormat:  timeFormat,
-		timeWidth:   tw,
-		theme:       th,
+	l.hostWidth = w
+	l.displayHost = truncateHost(l.host, w)
+}
+
+// hostWidthFor is the startup policy (spec §9.4): the host's own length,
+// clamped — the column is as wide as the target needs.
+func hostWidthFor(host string) int {
+	w := utf8.RuneCountInString(host)
+	if w < minHostWidth {
+		w = minHostWidth
 	}
+	if w > maxHostWidth {
+		w = maxHostWidth
+	}
+	return w
 }
 
 // Line is one renderable status line.
@@ -162,10 +218,10 @@ func (l *Layout) formatLine(ln Line, frame rune) string {
 	return strings.TrimRight(s, " ")
 }
 
-// FullWidth returns the untrimmed width of a rendered line, used to pad
-// live updates so overwrites clear stale characters.
+// FullWidth returns the untrimmed cell width of a rendered line, used to
+// pad live updates so overwrites clear stale characters.
 func (l *Layout) FullWidth() int {
-	return l.timeWidth + 2 + l.hostWidth + 1 + 7 + 1 + 14 + 1 + 7 + 1 + 7 + 1 + 7 + 1 + 8
+	return l.fixedWidth() + l.hostWidth
 }
 
 // FormatDuration renders a duration as "Nd HH:MM:SS", capped at "99d+"
@@ -197,17 +253,59 @@ func formatTime(t time.Time, format string) string {
 	return t.Format("15:04:05")
 }
 
+// truncateHost keeps the first w-1 cells of host plus an ellipsis so the
+// column stays exactly w cells wide. Cell-counted in runes: multibyte
+// hosts must not widen the field or corrupt the slice (byte-slicing could
+// cut mid-rune — DECISIONS #64).
 func truncateHost(host string, w int) string {
-	if len(host) <= w {
+	r := []rune(host)
+	if len(r) <= w {
 		return host
 	}
-	// Keep w-1 runes plus the ellipsis so the column stays exactly w wide.
-	return host[:w-1] + "…"
+	return string(r[:w-1]) + "…"
 }
 
+// pad left- or right-pads s to w CELLS (runes). Never truncates: every
+// caller's value is at most w cells by construction (RTT fields can drift
+// with extreme values — same behavior as before, the renderer's wrap math
+// counts the actual string width). A multibyte s keeps its full width —
+// padding is computed from runes so columns never shift.
 func pad(s string, w int, right bool) string {
-	if right {
-		return fmt.Sprintf("%*s", w, s)
+	n := utf8.RuneCountInString(s)
+	if n >= w {
+		return s
 	}
-	return fmt.Sprintf("%-*s", w, s)
+	if right {
+		return strings.Repeat(" ", w-n) + s
+	}
+	return s + strings.Repeat(" ", w-n)
+}
+
+// cellWidth returns the display-cell width of a rendered line: its runes,
+// ignoring ANSI escape sequences (SGR colors add bytes but no cells). The
+// window renderer uses this to count physical rows — a line wider than the
+// terminal wraps, and the cursor math must count wrapped rows exactly.
+func cellWidth(s string) int {
+	n := 0
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' {
+			if i+1 < len(s) && s[i+1] == '[' {
+				j := i + 2
+				for j < len(s) && !(s[j] >= 0x40 && s[j] <= 0x7e) {
+					j++
+				}
+				if j < len(s) {
+					j++ // consume the final byte
+				}
+				i = j
+				continue
+			}
+			i++
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(s[i:])
+		n++
+		i += size
+	}
+	return n
 }

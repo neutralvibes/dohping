@@ -22,6 +22,16 @@ import (
 // for a screen clear — see DECISIONS #53). Content above and below the
 // window block is left exactly as it was.
 //
+// Terminal resize (DECISIONS #64): the block re-measures the terminal on
+// EVERY redraw — width drives the HOST column (Layout.Resize: it expands
+// with available width, retracts to the 15-cell minimum, and truncates
+// long hosts with …), height drives the visible-line count, and the
+// cursor math counts PHYSICAL rows so a line that wraps below the minimum
+// column widths still repaints as a coherent block. The re-measure is
+// platform-neutral: it runs on probe events and the 1-second tick (so
+// Windows, which has no SIGWINCH, self-heals within a second), and the
+// Unix SIGWINCH channel is just the immediate-repaint fast path.
+//
 // The state engine's event semantics are identical to the plain display;
 // only the rendering differs.
 type Window struct {
@@ -30,26 +40,27 @@ type Window struct {
 	lines    int // visible data lines (history + live)
 	quiet    bool
 	noHeader bool
-	heightFn func() int // terminal height; 0 = unknown
+	sizeFn   func() (width, height int) // terminal size; 0 = unknown
 	now      func() time.Time
 
-	started  bool
-	lastRows int    // rows the block occupied in the previous frame
-	history  []Line // finalized lines, bounded to lines-1
-	cur      *Line  // current live line
-	frame    int    // liveness animation frame (advances per probe event)
+	started      bool
+	lastPhysRows int    // PHYSICAL rows the block occupied in the previous frame
+	history      []Line // finalized lines, bounded to lines-1
+	cur          *Line  // current live line
+	frame        int    // liveness animation frame (advances on Tick)
 }
 
 // NewWindow builds a window display. lines is the visible data-line count
-// (--window-lines); heightFn returns the terminal height (0 = unknown).
-func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, heightFn func() int) *Window {
+// (--window-lines); sizeFn returns the terminal size in cells (0 =
+// unknown → startup column policy, full configured window height).
+func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, sizeFn func() (width, height int)) *Window {
 	return &Window{
 		w:        w,
 		layout:   layout,
 		lines:    lines,
 		quiet:    quiet,
 		noHeader: noHeader,
-		heightFn: heightFn,
+		sizeFn:   sizeFn,
 		now:      time.Now,
 	}
 }
@@ -127,67 +138,108 @@ func (w *Window) Tick() {
 // height (header + visible data rows), padded with blank rows when there
 // are fewer events than the window holds, so the block never grows into
 // the terminal and never relies on scrollback.
+//
+// Every redraw re-measures the terminal (DECISIONS #64): width re-computes
+// the HOST column, height re-computes the visible-line count, and each
+// row's PHYSICAL span is counted (a line wider than the terminal wraps,
+// so the cursor-up count and stale-row clearing are in physical rows, not
+// logical lines — logical math is what fragmented the screen on resize).
 func (w *Window) Redraw() {
 	if w.quiet {
 		return
 	}
-	visible := w.visibleLines()
+	tw, th := 0, 0
+	if w.sizeFn != nil {
+		tw, th = w.sizeFn()
+	}
+	if tw > 0 {
+		w.layout.Resize(tw)
+	}
+	visible := w.visibleLinesFrom(th)
 	rows := visible
 	if !w.noHeader {
 		rows++
 	}
-	var sb strings.Builder
-	if w.started && w.lastRows > 1 {
-		// The cursor sits on the last row of the previous block; move it
-		// back to the block's top row AND to column 0. Cursor-up alone
-		// preserves the column, which would start every row mid-line and
-		// leave stale fragments on screen (user report, DECISIONS #54).
-		fmt.Fprintf(&sb, "\x1b[%dA\r", w.lastRows-1)
-	}
+
+	// Render every row of the frame up front so the physical span of the
+	// whole block is known before any cursor movement is emitted.
+	rowStrs := make([]string, rows)
+	idx := 0
 	if !w.noHeader {
-		sb.WriteString(w.layout.Header())
-		sb.WriteString("\x1b[K\r\n")
+		rowStrs[idx] = w.layout.Header()
+		idx++
 	}
 	hist := w.history
 	if len(hist) > visible-1 {
 		hist = hist[len(hist)-(visible-1):]
 	}
-	// Data rows: finalized history (oldest at top), then the live line,
-	// then blank padding rows so the block height stays constant. Rows are
-	// separated by CRLF — bare LF moves down without resetting the column,
-	// which would start every row at the previous row's end (DECISIONS #54).
 	for i := 0; i < visible; i++ {
 		switch {
 		case i < len(hist):
-			sb.WriteString(w.layout.FormatLine(hist[i]))
+			rowStrs[idx] = w.layout.FormatLine(hist[i])
 		case w.cur != nil && i == len(hist):
 			// Live row carries the liveness animation frame; history rows
 			// stay static (FormatLine) so the block doesn't buzz.
-			sb.WriteString(w.layout.FormatLiveLine(*w.cur, frameChar(w.frame)))
+			rowStrs[idx] = w.layout.FormatLiveLine(*w.cur, frameChar(w.frame))
 		}
+		idx++
+	}
+	totalPhys := 0
+	for _, s := range rowStrs {
+		totalPhys += physicalRows(cellWidth(s), tw)
+	}
+
+	var sb strings.Builder
+	if w.started && w.lastPhysRows > 1 {
+		// The cursor sits on the last physical row of the previous block;
+		// move it back to the block's top row AND to column 0. Cursor-up
+		// alone preserves the column, which would start every row mid-line
+		// and leave stale fragments on screen (user report, DECISIONS #54).
+		fmt.Fprintf(&sb, "\x1b[%dA\r", w.lastPhysRows-1)
+	}
+	for i, s := range rowStrs {
+		sb.WriteString(s)
 		sb.WriteString("\x1b[K") // clear this row to its end (stale chars)
-		if i < visible-1 {
+		if i < len(rowStrs)-1 {
+			// Rows separated by CRLF — bare LF moves down without
+			// resetting the column (DECISIONS #54).
 			sb.WriteString("\r\n")
 		}
 	}
-	// If the block shrank (terminal resized smaller), clear the stale rows
-	// left below it, then return the cursor to the new last row.
-	if w.started && w.lastRows > rows {
-		for i := 0; i < w.lastRows-rows; i++ {
+	// If the block shrank (terminal resized bigger, or a wrapped line
+	// unwrapped), clear the stale rows left below it, then return the
+	// cursor to the new last row.
+	if w.started && w.lastPhysRows > totalPhys {
+		for i := 0; i < w.lastPhysRows-totalPhys; i++ {
 			sb.WriteString("\x1b[1B\x1b[K")
 		}
-		fmt.Fprintf(&sb, "\x1b[%dA", w.lastRows-rows)
+		fmt.Fprintf(&sb, "\x1b[%dA", w.lastPhysRows-totalPhys)
 	}
 	w.started = true
-	w.lastRows = rows
+	w.lastPhysRows = totalPhys
 	fmt.Fprint(w.w, sb.String())
+}
+
+// physicalRows is how many terminal rows a line of the given cell width
+// occupies at the given terminal width: 1 unless it wraps. Unknown
+// terminal width (≤ 0) never wraps.
+func physicalRows(cells, termWidth int) int {
+	if termWidth <= 0 || cells <= termWidth {
+		return 1
+	}
+	return (cells + termWidth - 1) / termWidth
 }
 
 // visibleLines returns how many data lines fit: the configured window
 // size, reduced when the terminal is too small (spec §8.5), never below 1.
 func (w *Window) visibleLines() int {
+	_, th := w.terminalSize()
+	return w.visibleLinesFrom(th)
+}
+
+func (w *Window) visibleLinesFrom(h int) int {
 	n := w.lines
-	if h := w.heightFn(); h > 0 {
+	if h > 0 {
 		headerRows := 0
 		if !w.noHeader {
 			headerRows = 1
@@ -200,6 +252,13 @@ func (w *Window) visibleLines() int {
 		n = 1
 	}
 	return n
+}
+
+func (w *Window) terminalSize() (int, int) {
+	if w.sizeFn == nil {
+		return 0, 0
+	}
+	return w.sizeFn()
 }
 
 // finalizeLine moves the current line into bounded history when a status

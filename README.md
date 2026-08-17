@@ -90,8 +90,11 @@ TIME      HOST            STATUS  DURATION       MIN     MAX     AVG     FAILS
 
 Columns: `TIME` (status start), `HOST`, `STATUS`, `DURATION` (`Nd
 HH:MM:SS`, capped at `99d+`), `MIN`/`MAX`/`AVG` RTT in ms (blank when
-down), `FAILS` (consecutive failed probes while down). The HOST column
-width is computed once at startup (min 15, max 40, truncated with `…`).
+down), `FAILS` (consecutive failed probes while down). The HOST column is
+elastic: as wide as the host needs (min 15, max 40, truncated with `…`),
+and in window mode it also re-measures against the terminal width on every
+resize — long hosts expand when room exists, and a narrow terminal forces
+the column to retract rather than wrap.
 
 ### Window mode
 
@@ -103,6 +106,13 @@ lines fall off and the block height never grows. When stdout is not a
 terminal, window mode falls back to plain line mode with a warning on
 stderr (unless `--quiet`). If the terminal is too small, the visible line
 count is reduced to fit.
+
+**Terminal resizes are handled** — on Unix a SIGWINCH repaints the block
+immediately; on Windows (no SIGWINCH) the 1-second tick re-measures, so
+resizes self-heal within a second. Every repaint re-reads the terminal
+size: the HOST column retracts/expands to fit (minimum 15 + the fixed
+columns = 81 cells), and if the terminal is narrower than that minimum the
+lines wrap but the block stays a coherent, non-interleaved stack.
 
 ## Logging
 

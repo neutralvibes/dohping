@@ -132,7 +132,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	windowActive := opts.Window && tty.Stdout
 	if windowActive {
 		wd := output.NewWindow(stdout, layout, opts.WindowLines, opts.Quiet, opts.NoHeader,
-			defaultHeightFn(stdout))
+			defaultSizeFn(stdout))
 		wd.Enter()
 		defer wd.Exit()
 		disp = wd
@@ -261,19 +261,23 @@ type displayer interface {
 	Tick()
 }
 
-// defaultHeightFn reads the terminal height from an *os.File writer
-// (bytes.Buffer in tests → 0 = unknown → use the configured window size).
-func defaultHeightFn(w io.Writer) func() int {
+// defaultSizeFn reads the terminal size (width, height) from an *os.File
+// writer (bytes.Buffer in tests → (0, 0) = unknown → startup column
+// policy and the configured window size). Re-measured on EVERY redraw, so
+// a resize is picked up by probe events, the 1-second tick (the only
+// mechanism Windows has — no SIGWINCH there), and the Unix SIGWINCH fast
+// path alike.
+func defaultSizeFn(w io.Writer) func() (int, int) {
 	f, ok := w.(*os.File)
 	if !ok {
-		return func() int { return 0 }
+		return func() (int, int) { return 0, 0 }
 	}
-	return func() int {
-		h, _, err := term.GetSize(int(f.Fd()))
+	return func() (int, int) {
+		width, height, err := term.GetSize(int(f.Fd()))
 		if err != nil {
-			return 0
+			return 0, 0
 		}
-		return h
+		return width, height
 	}
 }
 
