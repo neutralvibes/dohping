@@ -1,14 +1,16 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (63 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (64 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
 
-**Status: build complete. All 6 phases green. Acceptance rounds 1–5 shipped
-(DECISIONS #50–61, 2026-08-17), the run-duration docs decision (#62), and the
-gosec security round (#63). User-verified so far: window mode in place, flags on
-either side of HOST, bare-seconds interval/timeout, clean exit summary, and the
-liveness animation. The user is mid-testing; expect more acceptance reports.**
+**Status: build complete. All 6 phases green. Acceptance rounds 1–6 shipped
+(DECISIONS #50–64, 2026-08-17), including the run-duration docs decision
+(#62), the gosec security round (#63), and the terminal-resize round
+(#64). User-verified so far: window mode in place, flags on either side
+of HOST, bare-seconds interval/timeout, clean exit summary, and the
+liveness animation. The resize fix (#64) is shipped and awaiting the
+user's own terminal test; expect more acceptance reports.**
 
 ---
 
@@ -72,21 +74,31 @@ and stage-marking; if in doubt, ASK, don't assume).
 | 59–61 | Liveness animation: rising bar `▁▃▅▇` at col 47, 1s ticker independent of probe cadence, tick refreshes DURATION | "needs something more visible to show it is working" / "blocks are not appearing in the right place" / "display needs to run every second" / "why doesn't duration update on the same schedule?" |
 | 62 | Docs: README "Timing model" note (first probe immediate; duration measured) | "it feels like it should be 5 secs… needs a value + 1" (rejected — see DECISIONS) |
 | 63 | gosec 2.28.0 clean: log 0600, TCP close discarded, 2 justified `#nosec` | "we need gosec" |
+| 64 | Terminal resize handled, platform-split: HOST elastic column (content-fit, terminal-capped, min 15 max 40, `…`), rune-based cell math, window re-measures every redraw, PHYSICAL-row cursor math (wrapped blocks stay coherent); Unix SIGWINCH fast path, Windows self-heals via the 1s tick | "Not handling terminal resize - breaks output" + "must be handled based on platform" |
 
 ## 4. Pending / next actions
 
-- **User is still testing** — no outstanding agent tasks. If the user reports
-  another acceptance issue: reproduce, fix, add regression test, re-run gates,
+- **User is mid-testing the #64 resize fix** — no outstanding agent tasks.
+  If the user reports another acceptance issue: reproduce, fix, add regression test, re-run gates,
   rebuild `dist/` via `scripts/release.sh`, republish to the rig (§6), record
   DECISIONS + CHECKPOINT entries, commit.
 - **Animation is user-testing territory**: the rising-bar placement (col 47) and
   the 1-second ticker were both corrected after user reports — if placement or
   cadence comes up again, verify against the rendered-screen tests first.
+- **Resize is user-testing territory**: the #64 design (HOST column
+  retraction/expansion, `…` truncation at min width, below-floor wrap staying
+  coherent) was proven in-unit and in a real PTY (scripts/pty-resize-probe.py),
+  but only the user's terminal is the final acceptance gate. If a resize report
+  comes back, re-verify against the width-injected window tests first.
+- Known, accepted limitation (DECISIONS #64): **plain-line live mode** leaves
+  wrap residue on the live line when the terminal shrinks below the line width
+  (scrolling output; cosmetic until the next status change). Not fixed — the
+  report was about window mode; offer as a follow-up if the user cares.
 - Areas the user has NOT explicitly verified yet (candidates to probe if asked):
   TCP probe mode (`-p tcp`), `--log-file` output (now 0600 — user may notice),
-  `--timestamp-format rfc3339`, terminal-resize behavior in window mode, the
-  darwin/windows binaries (built but never run on those OSes — Windows signal
-  codes are documented as closest-conventional, spec §18).
+  `--timestamp-format rfc3339`, the darwin/windows binaries (built but never run
+  on those OSes — Windows signal codes are documented as closest-conventional,
+  spec §18; Windows resize relies on the 1s tick, never run there either).
 - Proposed but not done: adding gosec to `scripts/release.sh` as an automatic
   gate (user hasn't answered the offer).
 
@@ -117,7 +129,7 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `09fc4d339cb3…` (2026-08-17, gosec round: log 0600 + G104 fix #63).
+- Current published linux-amd64 sha: `a384b1270dc4…` (2026-08-17, resize round #64; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works
@@ -139,8 +151,17 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   tests drive `Tick()` directly with an injected clock; the rendered-screen
   assertions in `display_test.go`/`window_test.go` cover placement and
   history-vs-live separation.
+- Resize tests: inject a terminal width via the window's `sizeFn` (helper
+  `newTestWindowResizable`), render through `termScreen` (which now simulates
+  DECAWM autowrap) and assert the visible grid at 120/81/60 cols — expansion,
+  retraction, `…` truncation, below-floor wrap coherence, stale-row clearing.
+- **Real-PTY resize proof**: `python3 scripts/pty-resize-probe.py` spawns the
+  built binary in a 60-col pty, resizes it to 100 mid-run (TIOCSWINSZ →
+  SIGWINCH), and renders the capture through a VT emulator, printing the
+  visible screen + cursor-up/shrink-clear sequence counts. Run it against a
+  FRESH build (`rm -f` the output first — stale-build trap).
 - Regression tests must accompany every acceptance fix (that's the established
-  pattern, #50–63 all have them).
+  pattern, #50–64 all have them).
 
 ## 8. Project conventions (user's way of working)
 
