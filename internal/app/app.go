@@ -1,0 +1,363 @@
+// Package app wires the CLI contract to the run orchestration: probe
+// construction, state engine, probe loop, display, logging, signals, and
+// graceful shutdown.
+package app
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"syscall"
+	"time"
+
+	"golang.org/x/term"
+
+	"dohping/internal/cli"
+	"dohping/internal/logx"
+	"dohping/internal/output"
+	"dohping/internal/ping"
+	"dohping/internal/signalx"
+	"dohping/internal/state"
+	"dohping/internal/theme"
+	"dohping/internal/version"
+)
+
+// Exit codes (spec §18).
+const (
+	ExitOK         = 0
+	ExitError      = 1
+	ExitUsage      = 2
+	ExitProbeInit  = 3
+	ExitInterrupt  = 130
+	ExitTerminated = 143
+)
+
+// TTY describes the terminal state of the process, injected so tests can
+// exercise both interactive and piped paths.
+type TTY struct {
+	Stdout    bool     // stdout is a terminal
+	Stdin     bool     // stdin is a terminal
+	StdinFile *os.File // stdin for the interactive q-quit reader (nil = none)
+}
+
+// stopReason classifies how a run ended.
+type stopReason int
+
+const (
+	stopCount     stopReason = iota // --count exhausted: normal completion
+	stopQuit                        // interactive q quit: normal completion
+	stopInterrupt                   // SIGINT / Ctrl-C
+	stopTerm                        // SIGTERM
+	stopPerm                        // permission-class operational error: exit 3
+)
+
+func (r stopReason) exitCode() int {
+	switch r {
+	case stopInterrupt:
+		return ExitInterrupt
+	case stopTerm:
+		return ExitTerminated
+	default:
+		return ExitOK
+	}
+}
+
+// keyEvent is a key-reader outcome.
+type keyEvent int
+
+const (
+	keyQuit  keyEvent = iota // q / Q pressed
+	keyCtrlC                 // 0x03 in raw mode (Ctrl-C without ISIG)
+	keyEOF                   // stdin closed
+)
+
+// Main is the process entry point: parse args, dispatch, return exit code.
+// Stdout/stderr/tty are injected so tests can capture output.
+func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
+	opts, action, err := cli.Parse(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "dohping: %v\n", err)
+		fmt.Fprintf(stderr, "run 'dohping --help' for usage\n")
+		return ExitUsage
+	}
+
+	switch action {
+	case cli.ActionHelp:
+		cli.WriteHelp(stdout)
+		return ExitOK
+	case cli.ActionVersion:
+		fmt.Fprintln(stdout, version.String())
+		return ExitOK
+	}
+
+	// Probe construction: operational errors (permission, DNS) exit 3
+	// with guidance — never a host-down condition.
+	pr, err := buildProbe(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "dohping: %v\n", err)
+		if ping.IsPermissionError(err) {
+			fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary)")
+		}
+		return ExitProbeInit
+	}
+	defer pr.Close()
+
+	eng := state.New(opts.DownAfter, opts.UpAfter)
+
+	// Log file: a failure to open is a clean error, never silent loss.
+	var logger *logx.Logger
+	if opts.LogFile != "" {
+		logger, err = logx.Open(opts.LogFile, opts.LogFormat, opts.Host)
+		if err != nil {
+			fmt.Fprintf(stderr, "dohping: unable to open log file %q: %v\n", opts.LogFile, err)
+			return ExitError
+		}
+		defer logger.Close()
+	}
+
+	colorEnabled := theme.Enabled(theme.Config{NoColor: opts.NoColor, ColorMode: opts.ColorMode},
+		tty.Stdout, theme.Env{NO_COLOR: os.Getenv("NO_COLOR"), TERM: os.Getenv("TERM")})
+	th := theme.NewRenderer(colorEnabled, theme.Default)
+	layout := output.NewLayout(opts.Host, opts.TimestampFormat, th)
+
+	live := !opts.NoLive && (opts.LiveMode == "on" || (opts.LiveMode == "auto" && tty.Stdout))
+
+	// Display selection (spec §17): quiet suppresses all; window mode needs
+	// a terminal (else fall back to plain mode with a warning); otherwise
+	// plain line mode.
+	var disp displayer
+	var winchCh <-chan os.Signal
+	windowActive := opts.Window && tty.Stdout
+	if windowActive {
+		wd := output.NewWindow(stdout, layout, opts.WindowLines, opts.Quiet, opts.NoHeader,
+			defaultHeightFn(stdout))
+		wd.Enter()
+		defer wd.Exit()
+		disp = wd
+		c, stop := signalx.Winch()
+		defer stop()
+		winchCh = c
+	} else {
+		if opts.Window && !opts.Quiet {
+			fmt.Fprintln(stderr, "dohping: warning: --window requires a terminal; falling back to plain line mode")
+		}
+		disp = output.NewDisplay(stdout, layout, opts.Quiet, opts.NoHeader, live)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sigCh, stopSig := signalx.Listen()
+	defer stopSig()
+
+	// Interactive q-quit reader (raw stdin when a terminal).
+	keyCh := make(chan keyEvent, 1)
+	if tty.Stdin && tty.StdinFile != nil {
+		restore, kerr := startKeyReader(tty.StdinFile, keyCh)
+		if kerr != nil {
+			fmt.Fprintf(stderr, "dohping: warning: cannot configure interactive quit: %v\n", kerr)
+		} else {
+			defer restore()
+		}
+	} else {
+		close(keyCh) // no key handling with piped stdin (spec §15.4)
+	}
+
+	events := make(chan state.Event, 8)
+	go func() {
+		Run(ctx, pr, eng, opts.Interval, opts.Count, events)
+		close(events)
+	}()
+
+	runStart := time.Now()
+	reason := stopCount
+	var permErr error
+loop:
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				break loop // Run finished: count exhausted or cancelled
+			}
+			disp.Handle(ev)
+			if logger != nil {
+				logEvent(logger, ev)
+			}
+			// A permission-class operational error (raw socket, ping
+			// socket, or ping command denied) is permanent — abort with
+			// guidance instead of probing in error state forever.
+			if (ev.Kind == state.EventError || ev.Kind == state.EventProbeError) && ev.Err != nil && ping.IsPermissionError(ev.Err) {
+				permErr = ev.Err
+				reason = stopPerm
+				cancel()
+			}
+		case sig := <-sigCh:
+			if sig == syscall.SIGTERM {
+				reason = stopTerm
+			} else {
+				reason = stopInterrupt
+			}
+			cancel()
+		case k, ok := <-keyCh:
+			if !ok {
+				keyCh = nil // reader gone; never select on it again
+				continue
+			}
+			switch k {
+			case keyQuit:
+				reason = stopQuit
+				cancel()
+			case keyCtrlC:
+				reason = stopInterrupt
+				cancel()
+			case keyEOF:
+				keyCh = nil
+			}
+		case <-winchCh:
+			if wd, ok := disp.(*output.Window); ok {
+				wd.Redraw()
+			}
+		}
+	}
+
+	// Graceful shutdown: finalize the current display line, log the final
+	// state, print the summary (interactive only), exit predictably.
+	disp.Finalize()
+	if logger != nil {
+		logFinal(logger, opts.Host, eng)
+	}
+	if reason == stopPerm {
+		// Permission problem: report with guidance, exit 3 — never a
+		// host-down condition, never an endless error state.
+		fmt.Fprintf(stderr, "dohping: %v\n", permErr)
+		fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary); on some systems the ping command itself needs privileges")
+		return ExitProbeInit
+	}
+	if !opts.Quiet && tty.Stdout {
+		printSummary(stdout, opts.Host, eng, time.Since(runStart))
+	}
+	return reason.exitCode()
+}
+
+// displayer is the interface shared by plain and window displays.
+type displayer interface {
+	Handle(state.Event)
+	Finalize()
+}
+
+// defaultHeightFn reads the terminal height from an *os.File writer
+// (bytes.Buffer in tests → 0 = unknown → use the configured window size).
+func defaultHeightFn(w io.Writer) func() int {
+	f, ok := w.(*os.File)
+	if !ok {
+		return func() int { return 0 }
+	}
+	return func() int {
+		h, _, err := term.GetSize(int(f.Fd()))
+		if err != nil {
+			return 0
+		}
+		return h
+	}
+}
+
+// startKeyReader puts stdin into raw mode and reads keys in a goroutine.
+// q/Q quits (exit 0); 0x03 (Ctrl-C in raw mode, ISIG off) interrupts
+// (exit 130). The terminal is restored when the reader exits and by the
+// returned restore function. With raw stdin, Ctrl-C no longer raises
+// SIGINT — the byte is mapped here so the exit code contract holds.
+func startKeyReader(f *os.File, out chan<- keyEvent) (restore func(), err error) {
+	oldState, err := term.MakeRaw(int(f.Fd()))
+	if err != nil {
+		return nil, err
+	}
+	restore = func() { _ = term.Restore(int(f.Fd()), oldState) }
+	go func() {
+		defer restore()
+		r := bufio.NewReader(f)
+		for {
+			b, err := r.ReadByte()
+			if err != nil {
+				out <- keyEOF
+				return
+			}
+			switch b {
+			case 'q', 'Q':
+				out <- keyQuit
+				return
+			case 0x03:
+				out <- keyCtrlC
+				return
+			case 0x04: // Ctrl-D: EOF for the reader, terminal restored
+				out <- keyEOF
+				return
+			}
+		}
+	}()
+	return restore, nil
+}
+
+// logEvent logs the state that just ended, if it is a real status period
+// (up/down/error). The initial unknown→X transition has nothing to log.
+func logEvent(l *logx.Logger, ev state.Event) {
+	if ev.Kind != state.EventStatusChange && ev.Kind != state.EventError {
+		return
+	}
+	if ev.PrevStatus != state.StatusUp && ev.PrevStatus != state.StatusDown && ev.PrevStatus != state.StatusError {
+		return
+	}
+	_ = l.Log(logx.Entry{
+		Time:     ev.Time,
+		Status:   ev.PrevStatus,
+		Duration: ev.Duration,
+		Fails:    ev.Fails,
+		Stats:    ev.PrevStats,
+	})
+}
+
+// logFinal logs the current state at shutdown.
+func logFinal(l *logx.Logger, host string, eng *state.Engine) {
+	if eng.Status() == state.StatusUnknown {
+		return // never started a real status
+	}
+	_ = l.Log(logx.Entry{
+		Time:     time.Now(),
+		Status:   eng.Status(),
+		Duration: time.Since(eng.Start()),
+		Fails:    eng.Fails(),
+		Stats:    eng.Stats(),
+	})
+}
+
+// printSummary renders the optional exit summary (spec §15.3), shown only
+// on interactive terminals so scripted/piped output stays parseable.
+func printSummary(w io.Writer, host string, eng *state.Engine, runDuration time.Duration) {
+	probes, ok, fail := eng.Totals()
+	loss := 0.0
+	if probes > 0 {
+		loss = float64(fail) / float64(probes) * 100
+	}
+	fmt.Fprintln(w, "--- dohping summary ---")
+	fmt.Fprintf(w, "%-16s %s\n", "host:", host)
+	fmt.Fprintf(w, "%-16s %s\n", "current status:", eng.Status())
+	fmt.Fprintf(w, "%-16s %s\n", "run duration:", formatRunDuration(runDuration))
+	fmt.Fprintf(w, "%-16s %d\n", "total probes:", probes)
+	fmt.Fprintf(w, "%-16s %d\n", "successful:", ok)
+	fmt.Fprintf(w, "%-16s %d\n", "failed:", fail)
+	fmt.Fprintf(w, "%-16s %.2f%%\n", "loss:", loss)
+}
+
+func formatRunDuration(d time.Duration) string {
+	return fmt.Sprintf("%02d:%02d:%02d", int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60)
+}
+
+// buildProbe constructs the configured probe type.
+func buildProbe(opts *cli.Options) (ping.Probe, error) {
+	switch opts.ProbeType {
+	case cli.ProbeTCP:
+		return ping.NewTCPProbe(opts.Host, opts.TCPPort, opts.Timeout)
+	default:
+		return ping.NewICMPProbe(opts.Host, opts.Timeout)
+	}
+}
