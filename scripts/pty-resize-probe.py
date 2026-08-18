@@ -8,12 +8,10 @@ Scenarios (argv[1]):
     IN PLACE across the resize: with column trimming (DECISIONS #71) the
     line never wraps at these widths, so the reflow cannot move it and
     exactly ONE block remains on screen (no frozen duplicate).
-  window-subfloor: same setup but 50x24 → 40x24 mid-run — a width change
-    INTO the below-floor wrap zone (the line fits one row at 50, wraps at
-    40): the fresh frame itself wraps at the settled width, so the block
-    FREEZES and restarts on a fresh row below the frozen rendering — the
-    reclaim's below-floor fallback (SPEC-window-resize-reclaim.md: two
-    blocks).
+  window-subfloor: same setup but 40x24 → 70x24 mid-run — a width change
+    BELOW the 47-cell essentials floor (the line wraps at 40, not at 70):
+    a genuine wrap-count change, so the block FREEZES and restarts on a
+    fresh row below the frozen rendering (DECISIONS #67/#70: two blocks).
   window-same-band: 60 → 55 mid-run — both widths keep the trimmed line in
     one row; repaints in place, one block (DECISIONS #70).
   plain: spawns PLAIN live mode in a fixed 60x24 pty (below the 81-cell
@@ -215,14 +213,13 @@ def main():
         return
 
     if mode == "window-subfloor":
-        # 50 → 40 mid-run. The line fits one row at 50; at 40 it wraps
-        # (below the essentials floor) — the fresh frame itself wraps at
-        # the settled width, so the block FREEZES then restarts below the
-        # frozen rendering: the reclaim's below-floor fallback
-        # (SPEC-window-resize-reclaim.md; two blocks on screen).
-        scr = TermScreen(rows, 50)
-        buf, code = capture(["--window"] + common, 50, rows, scr, resize_to=40)
-        print("=== visible screen at final width (40 cols) ===")
+        # 40 → 70 mid-run. At 40 the 47-cell essentials line wraps (2
+        # rows); at 70 it fits one row — a genuine wrap-count change, so
+        # the block FREEZES then restarts below the frozen rendering
+        # (DECISIONS #67 + #70 conditional freeze: two blocks on screen).
+        scr = TermScreen(rows, 40)
+        buf, code = capture(["--window"] + common, 40, rows, scr, resize_to=70)
+        print("=== visible screen at final width (70 cols) ===")
         print(scr.dump())
         print(f"=== exit status: {code} ===")
         headers = [r for r in range(rows) if scr.line(r).startswith("TIME")]

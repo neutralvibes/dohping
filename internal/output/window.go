@@ -51,19 +51,6 @@ import (
 // event-timed redraw landing mid-reflow writes to a canvas that is still
 // moving, which shifts the block by a row. Same-band repaints are
 // deferred, never restarted.
-//
-// REFLOW-AWARE RECLAIM (SPEC-window-resize-reclaim.md): a CROSSING that
-// settles above the essentials floor no longer freezes either. The
-// terminal reflows the on-screen frame to a known span — R = Σ
-// physicalRows(cellWidth(row), tw) over the last completed frame's rows,
-// the same sum the crossing decision already computes — and the cursor
-// follows its content through the reflow, so the reflowed frame's top is
-// exactly R−1 rows above the cursor. The block is therefore RECLAIMED in
-// place: walk back R−1, rewrite the fresh trimmed frame, clear the
-// R−N stale rows. No frozen copy, no restart, no scrollback reliance
-// (SPECIFICATION.md §8.5). The freeze survives only below the essentials
-// floor, where the fresh frame itself wraps and its reflowed span can
-// exceed the screen (R > th — the anchor is unknowable then).
 type Window struct {
 	w        io.Writer
 	layout   *Layout
@@ -80,11 +67,9 @@ type Window struct {
 	frame         int       // liveness animation frame (advances on Tick)
 	lastWidth     int       // terminal width at the last redraw (0 = unknown)
 	resizeSince   time.Time // when the current width change was first observed
-	resizePending bool      // width changed (crossing); redraws frozen until the terminal settles
+	resizePending bool      // width changed; redraws frozen until the terminal settles
 	lastRows      []string  // rendered rows of the last COMPLETED frame (resize reflow check)
 	deferPending  bool      // same-band width change; repaints deferred until the width settles (#73)
-	reclaimRows   int       // crossing settled above the floor: reflowed span of the on-screen frame to reclaim in place (SPEC-window-resize-reclaim)
-	forceRender   bool      // finalize: render now regardless of the settle window
 }
 
 // NewWindow builds a window display. lines is the visible data-line count
@@ -153,14 +138,20 @@ func (w *Window) Finalize() {
 	ln.Duration = w.now().Sub(ln.Time)
 	w.pushHistory(ln)
 	w.cur = nil
-	// A resize in flight forces the render: the final block must land
-	// NOW, not after the settle window — reclaimed in place when the
-	// crossing is reclaimable, restarted below otherwise (DECISIONS #67,
-	// SPEC-window-resize-reclaim.md). The same-band defer (#73) is
-	// cleared for the same reason.
-	w.forceRender = true
+	// A resize in flight forces the restart: the final block must land
+	// below the frozen rendering, never reclaim it (DECISIONS #67). The
+	// freeze decision itself is conditional (#70) — observeResize. A
+	// same-band defer (#73) is cleared: the final block must render now,
+	// not wait out the settle.
+	tw, _ := w.terminalSize()
+	w.observeResize(tw)
+	forced := w.resizePending || w.deferPending
+	w.resizeRestart()
+	w.deferPending = false
+	if forced {
+		debugx.Debugf("redraw", "finalize forces render (tw=%d)", tw)
+	}
 	w.Redraw()
-	w.forceRender = false
 	fmt.Fprint(w.w, "\r\n")
 }
 
@@ -212,9 +203,14 @@ func (w *Window) Redraw() {
 	// mismatch is how a shifted block shows up in the log).
 	interesting := w.resizePending || w.deferPending
 	w.observeResize(tw)
-	if w.resizePending && !w.resizeSettled() {
-		debugx.Debugf("redraw", "suppressed (crossing, %v left of settle)", resizeSettleDelay-w.now().Sub(w.resizeSince))
-		return // mid-reflow: defer the redraw
+	if w.resizePending {
+		if w.now().Sub(w.resizeSince) >= resizeSettleDelay {
+			debugx.Debugf("redraw", "freeze settled → restart below frozen block")
+			w.resizeRestart()
+		} else {
+			debugx.Debugf("redraw", "suppressed (freeze, %v left of settle)", resizeSettleDelay-w.now().Sub(w.resizeSince))
+			return // mid-reflow: defer the redraw
+		}
 	}
 	if w.deferPending {
 		// Same-band resize (DECISIONS #73): the reflow cannot move the
@@ -224,7 +220,7 @@ func (w *Window) Redraw() {
 		// then repaint in place (no frozen block, no restart). Every
 		// further width change restarts the settle clock (a drag extends
 		// the hold).
-		if w.resizeSettled() {
+		if w.now().Sub(w.resizeSince) >= resizeSettleDelay {
 			debugx.Debugf("redraw", "defer released → in-place repaint")
 			w.deferPending = false
 		} else {
@@ -269,49 +265,18 @@ func (w *Window) Redraw() {
 		totalPhys += physicalRows(cellWidth(s), tw)
 	}
 
-	// Settled crossing (REFLOW-AWARE RECLAIM, SPEC-window-resize-reclaim
-	// .md): the terminal has re-wrapped the on-screen frame to R rows —
-	// reflowedSpan of the last completed frame at the new width — and the
-	// cursor followed its content, so the frame's top is exactly R−1 rows
-	// above the cursor. Reclaim it in place: walk back R−1, overwrite
-	// with the fresh trimmed frame, clear the R−N stale rows. No frozen
-	// copy, no restart, no scrollback reliance (§8.5). The freeze remains
-	// the fallback when the fresh frame itself wraps (below the essentials
-	// floor — its anchor is unknowable) or when the reflowed span cannot
-	// fit the screen (R > th).
-	if w.resizePending {
-		if freshFits(rowStrs, tw) {
-			R := reflowedSpan(w.lastRows, tw)
-			if R <= th {
-				debugx.Debugf("redraw", "reclaim in place (R=%d N=%d tw=%d)", R, totalPhys, tw)
-				w.reclaimRows = R
-			} else {
-				debugx.Debugf("redraw", "freeze settled → restart below frozen block (tw=%d)", tw)
-				w.resizeRestart()
-			}
-		} else {
-			debugx.Debugf("redraw", "freeze settled → restart below frozen block (tw=%d)", tw)
-			w.resizeRestart()
-		}
-		w.resizePending = false
-	}
-
 	// Reflowing-terminal re-anchor was removed with the CPR machinery
 	// (DECISIONS #67): ConPTY's cursor positions are unreliable on resize,
-	// so the block never reclaims a reflowed rendering via a query — the
-	// reclaim above needs no answer, only the app's own R math.
+	// so the block never reclaims a reflowed rendering — it freezes, then
+	// restarts below (see the resizeNote block at the top of Redraw).
 
 	var sb strings.Builder
-	walkBack := w.lastPhysRows
-	if w.reclaimRows > 0 {
-		walkBack = w.reclaimRows
-	}
-	if w.started && walkBack > 1 {
+	if w.started && w.lastPhysRows > 1 {
 		// The cursor sits on the last physical row of the previous block;
 		// move it back to the block's top row AND to column 0. Cursor-up
 		// alone preserves the column, which would start every row mid-line
 		// and leave stale fragments on screen (user report, DECISIONS #54).
-		fmt.Fprintf(&sb, "\x1b[%dA\r", walkBack-1)
+		fmt.Fprintf(&sb, "\x1b[%dA\r", w.lastPhysRows-1)
 	}
 	for i, s := range rowStrs {
 		sb.WriteString(s)
@@ -328,27 +293,17 @@ func (w *Window) Redraw() {
 	// cursor-down preserves the column, and the cursor may sit at the end
 	// of a non-blank last row (full window), so ESC[K alone would only
 	// clear from that column and leave the stale text (DECISIONS #65).
-	staleClear := w.lastPhysRows
-	if w.reclaimRows > 0 {
-		staleClear = w.reclaimRows
-	}
-	if w.started && staleClear > totalPhys {
-		for i := 0; i < staleClear-totalPhys; i++ {
+	if w.started && w.lastPhysRows > totalPhys {
+		for i := 0; i < w.lastPhysRows-totalPhys; i++ {
 			sb.WriteString("\x1b[1B\r\x1b[K")
 		}
-		fmt.Fprintf(&sb, "\x1b[%dA", staleClear-totalPhys)
+		fmt.Fprintf(&sb, "\x1b[%dA", w.lastPhysRows-totalPhys)
 	}
-	reclaimed := w.reclaimRows > 0
-	w.reclaimRows = 0
 	w.started = true
 	w.lastPhysRows = totalPhys
 	w.lastRows = rowStrs
 	if interesting {
-		if reclaimed {
-			debugx.Debugf("redraw", "reclaimed tw=%d phys=%d (was %d) rows=%d", tw, totalPhys, walkBack, rows)
-		} else {
-			debugx.Debugf("redraw", "repainted tw=%d phys=%d (was %d) rows=%d", tw, totalPhys, w.lastPhysRows, rows)
-		}
+		debugx.Debugf("redraw", "repainted tw=%d phys=%d (was %d) rows=%d", tw, totalPhys, w.lastPhysRows, rows)
 	}
 	fmt.Fprint(w.w, sb.String())
 }
@@ -361,46 +316,6 @@ func physicalRows(cells, termWidth int) int {
 		return 1
 	}
 	return (cells + termWidth - 1) / termWidth
-}
-
-// reflowedSpan is the physical span the given frame's rows would occupy
-// if the terminal re-wrapped them at tw — the height of the on-screen
-// block after a reflow, and therefore the anchor math for the in-place
-// reclaim (SPEC-window-resize-reclaim.md §3.1): the cursor follows its
-// content through the reflow, so the reflowed frame's top is exactly
-// reflowedSpan−1 rows above it.
-func reflowedSpan(rows []string, tw int) int {
-	n := 0
-	for _, r := range rows {
-		n += physicalRows(cellWidth(r), tw)
-	}
-	return n
-}
-
-// freshFits reports whether every row of the fresh frame fits on a single
-// physical row at tw — the essentials-floor test. Above the floor the
-// trim (DECISIONS #71) guarantees it, so a reclaim leaves a clean block;
-// below it the fresh frame wraps by design and its reflowed anchor is
-// unknowable, so the freeze fallback applies (SPEC-window-resize-reclaim
-// .md §3.2).
-func freshFits(rows []string, tw int) bool {
-	if tw <= 0 {
-		return false
-	}
-	for _, r := range rows {
-		if cellWidth(r) > tw {
-			return false
-		}
-	}
-	return true
-}
-
-// resizeSettled reports whether the width has been stable for
-// resizeSettleDelay — the point where a write is safe again (no
-// mid-reflow canvas). A finalize forces the render immediately
-// (forceRender), never waiting out the settle.
-func (w *Window) resizeSettled() bool {
-	return w.forceRender || w.now().Sub(w.resizeSince) >= resizeSettleDelay
 }
 
 // visibleLines returns how many data lines fit: the configured window
@@ -435,23 +350,20 @@ func (w *Window) terminalSize() (int, int) {
 }
 
 // observeResize records a width change and decides how the block must
-// behave (DECISIONS #67 + #70 + #73, SPEC-window-resize-reclaim.md). A
-// reflowing terminal re-wraps existing lines on width change, but a line
-// that keeps its physical row count cannot move in a reflow (it fits in
-// the same rows at both widths — the DECISIONS #68 safety reasoning,
-// generalized from one line to the whole block). So: if any row of the
-// last COMPLETED frame changes its physical row count at the new width,
-// the block would move — redraws FREEZE until the width has been stable
-// for resizeSettleDelay, then the settle decides between an in-place
-// RECLAIM (above the essentials floor, where the reflowed span is
-// exactly known) and a restart below the frozen rendering (below the
-// floor / when the reflowed span exceeds the screen). If every row keeps
-// its count, the block may be reclaimed in place — but the repaint is
-// DEFERRED for the same settle delay (#73), so no event-timed redraw
-// lands mid-reflow. While either is pending, every further width change
-// restarts the settle clock (a drag extends the hold). The first
-// observation only calibrates lastWidth; no decision runs before a frame
-// has been completed. No-op when the width is unknown (≤ 0).
+// behave (DECISIONS #67 + #70 + #73). A reflowing terminal re-wraps
+// existing lines on width change, but a line that keeps its physical row
+// count cannot move in a reflow (it fits in the same rows at both widths
+// — the DECISIONS #68 safety reasoning, generalized from one line to the
+// whole block). So: if any row of the last COMPLETED frame changes its
+// physical row count at the new width, the block would move and redraws
+// FREEZE until the width has been stable for resizeSettleDelay, then
+// restart below the frozen rendering; if every row keeps its count, the
+// block may be reclaimed in place — but the repaint is DEFERRED for the
+// same settle delay (#73), so no event-timed redraw lands mid-reflow.
+// While either is pending, every further width change restarts the settle
+// clock (a drag extends the hold). The first observation only calibrates
+// lastWidth; no decision runs before a frame has been completed. No-op
+// when the width is unknown (≤ 0).
 func (w *Window) observeResize(tw int) {
 	if tw <= 0 {
 		return
@@ -466,10 +378,10 @@ func (w *Window) observeResize(tw int) {
 	old := w.lastWidth
 	w.lastWidth = tw
 	if w.resizePending {
-		// Already pending: keep holding and restart the settle clock —
-		// a drag across further widths extends the hold (#67 behavior).
+		// Already frozen: keep freezing and restart the settle clock —
+		// a drag across further widths extends the freeze (#67 behavior).
 		w.resizeSince = w.now()
-		debugx.Debugf("resize", "drag: %d→%d (settle clock restarted)", old, tw)
+		debugx.Debugf("resize", "drag: %d→%d (freeze clock restarted)", old, tw)
 		return
 	}
 	if !w.started {
@@ -477,12 +389,15 @@ func (w *Window) observeResize(tw int) {
 		return // no completed frame yet — nothing on screen to reclaim
 	}
 	// Would a reflow to the new width move the last completed frame?
-	reflowed := reflowedSpan(w.lastRows, tw)
+	reflowed := 0
+	for _, r := range w.lastRows {
+		reflowed += physicalRows(cellWidth(r), tw)
+	}
 	if reflowed != w.lastPhysRows {
 		w.resizeSince = w.now()
 		w.resizePending = true
 		w.deferPending = false
-		debugx.Debugf("resize", "%d→%d rows %d→%d → crossing (settle decides reclaim/freeze)", old, tw, w.lastPhysRows, reflowed)
+		debugx.Debugf("resize", "%d→%d rows %d→%d → FREEZE (block would move)", old, tw, w.lastPhysRows, reflowed)
 	} else {
 		// Same band: nothing moved, so the block may be reclaimed in
 		// place — but NOT this instant. The terminal is reflowing right

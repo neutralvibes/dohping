@@ -138,18 +138,15 @@ the old block stays in scrollback as history, and the live data is always
 correct from the next repaint. Plain line mode's single live line has its
 own freeze treatment (see above).
 
-**A note on resizing — resizing terminals can briefly fracture output.**
+**A note on resizing — resizing terminals can cause output to fracture.**
 On reflowing terminals (Windows Terminal, Terminal.app, iTerm2) a resize
-re-wraps the whole screen in ways the program cannot observe mid-reflow.
-The window block therefore writes nothing while the width is moving
-(300 ms settle after the last change) and then repaints — reclaiming its
-own region in place when the resize crossed a wrap boundary, so the
-screen settles to exactly one clean block. During the drag itself the
-terminal re-wraps the on-screen rendering (transient, unavoidable
-without writing mid-reflow). Below ~46 columns even the essentials
-(TIME/HOST/STATE/DURATION) cannot fit and the lines wrap — coherently,
-but wrapped, and a resize that *settles* there leaves one frozen copy
-above the fresh block. Hosts with RTT ≥ 10,000 ms overflow their RTT
+re-wraps the whole screen in ways the program cannot observe. The window
+block defers its redraws until the width has been stable (300 ms) and
+never writes mid-reflow, but the terminal's own reflow can still leave the
+block briefly offset by a row (ConPTY's cursor placement is unreliable on
+resize); it self-corrects on the next repaint. Below ~46 columns even the
+essentials (TIME/HOST/STATE/DURATION) cannot fit and the lines wrap —
+coherently, but wrapped. Hosts with RTT ≥ 10,000 ms overflow their RTT
 columns and widen the line.
 
 ## Logging
