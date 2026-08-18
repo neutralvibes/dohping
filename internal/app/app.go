@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"dohping/internal/cli"
+	"dohping/internal/debugx"
 	"dohping/internal/logx"
 	"dohping/internal/output"
 	"dohping/internal/ping"
@@ -80,6 +81,14 @@ const (
 // Main is the process entry point: parse args, dispatch, return exit code.
 // Stdout/stderr/tty are injected so tests can capture output.
 func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
+	// Optional diagnostic logger (DECISIONS #74): DOHPING_DEBUG=<path>
+	// enables the resize/redraw forensics file — the app's own record of
+	// the widths a resize drag passes through (no terminal displays
+	// them). File-only: the display owns the terminal, so debug output
+	// never goes there.
+	debugx.Init()
+	defer debugx.Close()
+
 	opts, action, err := cli.Parse(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "dohping: %v\n", err)
@@ -153,6 +162,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		wd.Enter()
 		defer wd.Exit()
 		disp = wd
+		debugx.Debugf("display", "window mode active (lines=%d)", opts.WindowLines)
 		c, stop := signalx.Winch()
 		defer stop()
 		winchCh = c
@@ -162,6 +172,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		}
 		disp = output.NewDisplay(stdout, layout, opts.Quiet, opts.NoHeader, live,
 			defaultSizeFn(stdout))
+		debugx.Debugf("display", "plain mode active (live=%v)", live)
 		if live {
 			// Plain live mode gets the same SIGWINCH fast path as the
 			// window: an immediate live-line repaint notices a width
@@ -248,9 +259,13 @@ loop:
 			// notice the width change and freeze/restart as needed
 			// (DECISIONS #67). On Windows the channel never fires — the
 			// 1-second tick covers resizes there (platform-split,
-			// DECISIONS #64/#65).
+			// DECISIONS #64/#65). Debug forensics (#74): whether ConPTY
+			// → WSL2 even delivers SIGWINCH is itself a fact the log
+			// must record.
+			debugx.Debugf("winch", "SIGWINCH received → repaint")
 			disp.Tick()
 		case <-tickCh:
+			debugx.Debugf("tick", "1s tick repaint")
 			disp.Tick()
 		}
 	}

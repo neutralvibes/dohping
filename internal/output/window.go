@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"dohping/internal/debugx"
 	"dohping/internal/state"
 )
 
@@ -144,8 +145,12 @@ func (w *Window) Finalize() {
 	// not wait out the settle.
 	tw, _ := w.terminalSize()
 	w.observeResize(tw)
+	forced := w.resizePending || w.deferPending
 	w.resizeRestart()
 	w.deferPending = false
+	if forced {
+		debugx.Debugf("redraw", "finalize forces render (tw=%d)", tw)
+	}
 	w.Redraw()
 	fmt.Fprint(w.w, "\r\n")
 }
@@ -191,11 +196,19 @@ func (w *Window) Redraw() {
 	// boundary) freezes; same-band changes repaint in place. Once settled,
 	// restart the block on a fresh row below the frozen rendering; the
 	// old block stays in scrollback as history.
+	// Debug forensics (DECISIONS #74): redraws during a resize episode
+	// are logged — the suppressed and deferred ones are the evidence
+	// that no write landed mid-reflow, and the settle repaint records
+	// the block's physical span against the previous frame's (a span
+	// mismatch is how a shifted block shows up in the log).
+	interesting := w.resizePending || w.deferPending
 	w.observeResize(tw)
 	if w.resizePending {
 		if w.now().Sub(w.resizeSince) >= resizeSettleDelay {
+			debugx.Debugf("redraw", "freeze settled → restart below frozen block")
 			w.resizeRestart()
 		} else {
+			debugx.Debugf("redraw", "suppressed (freeze, %v left of settle)", resizeSettleDelay-w.now().Sub(w.resizeSince))
 			return // mid-reflow: defer the redraw
 		}
 	}
@@ -208,8 +221,10 @@ func (w *Window) Redraw() {
 		// further width change restarts the settle clock (a drag extends
 		// the hold).
 		if w.now().Sub(w.resizeSince) >= resizeSettleDelay {
+			debugx.Debugf("redraw", "defer released → in-place repaint")
 			w.deferPending = false
 		} else {
+			debugx.Debugf("redraw", "deferred (settle, %v left)", resizeSettleDelay-w.now().Sub(w.resizeSince))
 			return
 		}
 	}
@@ -287,6 +302,9 @@ func (w *Window) Redraw() {
 	w.started = true
 	w.lastPhysRows = totalPhys
 	w.lastRows = rowStrs
+	if interesting {
+		debugx.Debugf("redraw", "repainted tw=%d phys=%d (was %d) rows=%d", tw, totalPhys, w.lastPhysRows, rows)
+	}
 	fmt.Fprint(w.w, sb.String())
 }
 
@@ -357,14 +375,17 @@ func (w *Window) observeResize(tw int) {
 	if tw == w.lastWidth {
 		return
 	}
+	old := w.lastWidth
 	w.lastWidth = tw
 	if w.resizePending {
 		// Already frozen: keep freezing and restart the settle clock —
 		// a drag across further widths extends the freeze (#67 behavior).
 		w.resizeSince = w.now()
+		debugx.Debugf("resize", "drag: %d→%d (freeze clock restarted)", old, tw)
 		return
 	}
 	if !w.started {
+		debugx.Debugf("resize", "%d→%d before first frame (no block on screen — ignored)", old, tw)
 		return // no completed frame yet — nothing on screen to reclaim
 	}
 	// Would a reflow to the new width move the last completed frame?
@@ -376,6 +397,7 @@ func (w *Window) observeResize(tw int) {
 		w.resizeSince = w.now()
 		w.resizePending = true
 		w.deferPending = false
+		debugx.Debugf("resize", "%d→%d rows %d→%d → FREEZE (block would move)", old, tw, w.lastPhysRows, reflowed)
 	} else {
 		// Same band: nothing moved, so the block may be reclaimed in
 		// place — but NOT this instant. The terminal is reflowing right
@@ -387,6 +409,7 @@ func (w *Window) observeResize(tw int) {
 		// block or restart.
 		w.resizeSince = w.now()
 		w.deferPending = true
+		debugx.Debugf("resize", "%d→%d rows %d→%d → defer (in-place after settle)", old, tw, w.lastPhysRows, reflowed)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"dohping/internal/debugx"
 	"dohping/internal/state"
 )
 
@@ -185,8 +186,12 @@ func (d *Display) printFinalized(s string) {
 	}
 	tw := d.termWidth()
 	d.resizeNote(tw)
+	forced := d.resizePending
 	oldPhys := d.lastPhysRows
 	d.resizeRestart() // force: finalize must land correctly even mid-episode
+	if forced {
+		debugx.Debugf("redraw", "plain finalize forces render (tw=%d)", tw)
+	}
 	d.resizeMarkAbove(oldPhys, s, tw)
 	var sb strings.Builder
 	if d.lastPhysRows > 1 {
@@ -233,6 +238,7 @@ func (d *Display) writeLive(s string) {
 	d.resizeNote(tw)
 	if d.resizePending {
 		if d.now().Sub(d.resizeSince) >= resizeSettleDelay {
+			debugx.Debugf("redraw", "plain freeze settled → fresh row below frozen line")
 			oldPhys := d.lastPhysRows
 			d.resizeRestart() // settled: fresh row below the frozen line
 			d.resizeMarkAbove(oldPhys, s, tw)
@@ -281,9 +287,11 @@ func (d *Display) resizeNote(tw int) {
 		return
 	}
 	if tw != d.lastWidth {
+		old := d.lastWidth
 		d.lastWidth = tw
 		d.resizeSince = d.now()
 		d.resizePending = true
+		debugx.Debugf("resize", "plain %d→%d → freeze", old, tw)
 	}
 }
 
