@@ -97,6 +97,8 @@ and stage-marking; if in doubt, ASK, don't assume).
   If the user reports another acceptance issue: reproduce, fix, add regression test, re-run gates,
   rebuild `dist/` via `scripts/release.sh`, republish to the rig (§6), record
   DECISIONS + CHECKPOINT entries, commit.
+- **HELD PLAN — reusable terminal test rig** (idea user-approved 2026-08-18,
+  build explicitly on hold until user says go): full plan in §10.
 - **Animation is user-testing territory**: the rising-bar placement (col 47) and
   the 1-second ticker were both corrected after user reports — if placement or
   cadence comes up again, verify against the rendered-screen tests first.
@@ -216,3 +218,54 @@ internal/signalx/            SIGINT/SIGTERM listen, SIGWINCH (unix/windows split
 scripts/release.sh           cross-compile + SHA256SUMS
 dist/                        release artifacts (5 binaries + sums)
 ```
+
+## 10. Held plan: reusable terminal test rig (2026-08-18, HELD)
+
+**Status: user approved the idea ("we will do"), explicitly HELD until a
+go-ahead. Do NOT build this without the user saying go.**
+
+**Why it exists:** 3 of the user's last 5 projects were command-line based.
+The rig lessons (render the stream through an emulator and assert the visible
+screen, never escape-list assertions; ONLCR traps; real-PTY resize proof) cost
+five acceptance rounds on dohping — they should carry forward, not be re-paid
+per project. Hard constraint the user added: the asset must be CI-ready — the
+project will live on GitHub, so anyone must be able to run the suite with a
+stock toolchain + stock Python, no agent, no sandbox.
+
+**Deliverables (one pass, ~1h total):**
+
+1. `~/.hermes/user/tools/scripts/pty-probe.py` — generalize
+   `scripts/pty-resize-probe.py` (which stays in this repo as the dohping-
+   specific instance):
+   - `--binary PATH` (fixes the hardcoded `/tmp/dohping-test`), `--scenario NAME`,
+     optional `--cols/--rows/--duration/--resize-to`.
+   - `SCENARIOS` dict: `name -> fn(binary, opts) -> bool`. dohping's two
+     scenarios ship as examples: `window` (freeze-and-restart on resize) and
+     `plain` (live line anchored below minimum width).
+   - Core untouched: `TermScreen` emulator, `pty.fork` capture, TIOCSWINSZ
+     injection, DSR/CPR answering, `RESULT: PASS/FAIL` + exit 0/1.
+   - stdlib-only (`pty`/`fcntl`/`termios`/`select`), POSIX — runs on
+     Linux/macOS CI runners; deterministic (fixed durations, no interactivity).
+2. `~/.hermes/user/tools/scripts/ci-terminal-probe.yml` — GitHub Actions
+   workflow template (copy into `.github/workflows/`, adjust build step +
+   scenario names): `rm -f` fresh build (stale-build trap), `go test -race ./...`,
+   `go vet`, gofmt check, probe `window` + `plain`, release matrix
+   (linux/darwin/windows × amd64/arm64 + SHA256SUMS). gosec via the securego
+   action or prebuilt tarball — NEVER `go install gosec@latest` (compiles the
+   LLM-SDK deps, OOM'd the sandbox, DECISIONS #63).
+3. `go-cli-development` skill: 3-line pointer to the parked harness.
+
+**Explicit non-goals (anti-over-engineering, agreed with user):** no Go-module
+extraction of `termScreen`/`noOnlcrScreen` (they stay dohping-internal);
+no plugin framework/YAML/classes — the dict of functions is the ceiling;
+no interactive-input injection hook (known future seam only, one comment in
+the file, for driving things like a `q`-quit).
+
+**CI notes:** probe uses TCP mode (`-p tcp`) so no ICMP caps are needed on
+runners; ICMP tiers stay unit-tested with mocks (runners have no raw sockets
+either — same constraint as the sandbox). Windows CI runs unit tests only
+(probe is POSIX); the emulator-grid unit tests cover the platform matrix.
+
+**Trigger:** user says go → build per this plan, commit in the tools/ repo
+(it is a git repo, branch `main`), repoint this HANDOFF §7 to the parked
+harness.
