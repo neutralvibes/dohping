@@ -1,2 +1,9 @@
+# derived artifacts (regenerated, never committed)
 dist/
+publish/
+
+# internal build-process docs (never published)
+build-docs/
+
+# local state
 .notify-state

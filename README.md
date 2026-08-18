@@ -257,5 +257,7 @@ staticcheck ./...   # static analysis
 govulncheck ./...   # vulnerability scan (dependency tree)
 ```
 
-Design decisions are tracked in `DECISIONS.md`; the build contract lives
-in `LAUNCH.md` / `Phases.md` / `SPECIFICATION.md`.
+Release builds: `bash scripts/release.sh` — reproducible cross-compiled
+binaries + `SHA256SUMS` into `dist/`. Terminal-output integration tests:
+`python3 scripts/pty-resize-probe.py` against a fresh build (see the script's
+header for scenarios).
