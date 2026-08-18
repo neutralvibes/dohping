@@ -389,3 +389,15 @@ either — same constraint as the sandbox). Windows CI runs unit tests only
 **Trigger:** user says go → build per this plan, commit in the tools/ repo
 (it is a git repo, branch `main`), repoint this HANDOFF §7 to the parked
 harness.
+
+- **Round 17 reclaim (8dcce21a) in WEAR-TEST (DECISIONS #77, 2026-08-18).**
+  Proper retest: user confirms "holds up really well but is not faultless,
+  which I think I will probably have to accept. I will wear it for a while."
+  The original round-18 rejection was based on a stale binary (the
+  unversioned-filename trap — now fixed: §6). The reclaim build is
+  published as `dohping-linux-amd64-8dcce21a` (experimental → wear-test);
+  B (0014967e) remains the shipped/committed build. On confirmation: revert
+  the B revert (2b2413b) and round-17 revert (96d4373) — one clean commit
+  that restores rounds 15+17 in a single revert-of-reverts, updates the
+  plain-name file, and updates INDEX. If the wear test reveals a real
+  blocker, B stays shipped and resize is closed.
