@@ -49,7 +49,8 @@ func countRedraws(s string) int { return len(cursorUpRe.FindAllString(s, -1)) }
 type termScreen struct {
 	rows, cols int
 	cells      [][]rune
-	r, c       int // cursor
+	r, c       int    // cursor
+	lineStart  []bool // row begins a NEW logical line (false = autowrap continuation) — the reflow model
 }
 
 func newTermScreen(rows, cols int) *termScreen {
@@ -57,7 +58,9 @@ func newTermScreen(rows, cols int) *termScreen {
 	for i := range cells {
 		cells[i] = make([]rune, cols)
 	}
-	return &termScreen{rows: rows, cols: cols, cells: cells}
+	ls := make([]bool, rows)
+	ls[0] = true
+	return &termScreen{rows: rows, cols: cols, cells: cells, lineStart: ls}
 }
 
 // feed renders one escape/control/text stream into the screen.
@@ -129,6 +132,7 @@ func (t *termScreen) feed(s string) {
 			if t.r >= t.rows {
 				t.r = t.rows - 1
 			}
+			t.lineStart[t.r] = true // a CRLF-separated row begins a logical line
 			i++
 		case ch < 0x20:
 			i++ // other control: ignore
@@ -136,13 +140,15 @@ func (t *termScreen) feed(s string) {
 			// DECAWM-style autowrap: at the right margin the next cell starts
 			// a new physical row (proves below-floor wrap behavior — DECISIONS
 			// #64). Placement is identical to a real terminal for the
-			// sequences dohping emits.
+			// sequences dohping emits. The continuation row is part of the
+			// SAME logical line (reflow model).
 			if t.c >= t.cols {
 				t.r++
 				if t.r >= t.rows {
 					t.r = t.rows - 1
 				}
 				t.c = 0
+				t.lineStart[t.r] = false
 			}
 			// decode the rune
 			r, size := decodeRune(s[i:])
@@ -188,6 +194,85 @@ func (t *termScreen) resize(cols int) {
 		}
 	}
 	t.cols = cols
+}
+
+// reflowResize models a REFLOWING terminal (Windows Terminal,
+// Terminal.app): on a width change every LOGICAL line is re-wrapped at
+// the new width — a line wider than the new width becomes multiple
+// physical rows, a previously wrapped line unwraps — and the cursor
+// follows its content (the app's invariant: it sits at the end of the
+// last written line, re-wrapped). This is the model for the user's
+// terminal and the anchor assumption of the in-place reclaim
+// (SPEC-window-resize-reclaim.md §3.1).
+func (t *termScreen) reflowResize(cols int) {
+	// Reconstruct logical lines from the lineStart markers, remembering
+	// which line the cursor sits in.
+	type line struct {
+		cells      []rune
+		cursorHere bool
+	}
+	var lines []line
+	var cur *line
+	flush := func() {
+		if cur != nil {
+			lines = append(lines, line{cells: append([]rune(nil), cur.cells...), cursorHere: cur.cursorHere})
+		}
+	}
+	for r := 0; r < t.rows; r++ {
+		if t.lineStart[r] {
+			flush()
+			cur = &line{}
+		}
+		end := len(t.cells[r])
+		for end > 0 && t.cells[r][end-1] == 0 {
+			end--
+		}
+		cur.cells = append(cur.cells, t.cells[r][:end]...)
+		if r == t.r {
+			cur.cursorHere = true
+		}
+	}
+	flush()
+
+	t.cols = cols
+	for r := range t.cells {
+		t.cells[r] = make([]rune, cols)
+	}
+	for r := range t.lineStart {
+		t.lineStart[r] = false
+	}
+	row := 0
+	t.r, t.c = 0, 0
+	for _, ln := range lines {
+		if row >= t.rows {
+			break
+		}
+		if len(ln.cells) == 0 {
+			t.lineStart[row] = true // a blank line stays a blank line
+			if ln.cursorHere {
+				t.r, t.c = row, 0
+			}
+			row++
+			continue
+		}
+		for off := 0; off < len(ln.cells); off += cols {
+			if row >= t.rows {
+				break
+			}
+			if off == 0 {
+				t.lineStart[row] = true
+			}
+			end := off + cols
+			if end > len(ln.cells) {
+				end = len(ln.cells)
+			}
+			copy(t.cells[row], ln.cells[off:end])
+			if ln.cursorHere {
+				t.r, t.c = row, end-off
+			}
+			row++
+		}
+	}
 }
 
 // TestWindowRenderedScreenClean is the regression test for DECISIONS #54:
@@ -520,12 +605,13 @@ func TestWindowTickRefreshesDuration(t *testing.T) {
 // rendered row: TIME(8) + 2sp + HOST(hostWidth) + 1sp.
 func statusCol(hostWidth int) int { return 8 + 2 + hostWidth + 1 }
 
-// TestWindowResizeGrowBackKeepsFrozenBlock: with a FULL block (history +
-// live, no blank padding) a grow-back resize must NOT reclaim the old
-// rendering — the block freezes and, once the width settles, restarts on a
-// fresh row below it (DECISIONS #67). Everything below the fresh block
-// must be clean.
-func TestWindowResizeGrowBackKeepsFrozenBlock(t *testing.T) {
+// TestWindowResizeGrowBackReclaimsInPlace: a full block rendered below
+// the essentials floor (wrapped, 2 rows per line) that crosses to a wide
+// width (the reflow UNWRAPS it) is RECLAIMED in place on a reflowing
+// terminal — the reflowed span is exactly known, so the block is
+// overwritten at its anchor: one block, no frozen copy
+// (SPEC-window-resize-reclaim.md; was the #67 grow-back freeze test).
+func TestWindowResizeGrowBackReclaimsInPlace(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 2, false, false, 40, 24)
 	*wPtr = 40
@@ -553,10 +639,13 @@ func TestWindowResizeGrowBackKeepsFrozenBlock(t *testing.T) {
 	buf.Reset()
 	w.Tick()
 	frame2 := buf.String()
+	if strings.HasPrefix(frame2, "\r\n") {
+		t.Fatalf("reclaim must not restart on a fresh row: %q", frame2)
+	}
 
 	scr := newTermScreen(24, 40)
 	scr.feed(frame1)
-	scr.resize(120)
+	scr.reflowResize(120) // reflowing terminal: the wrapped lines unwrap
 	scr.feed(frame2)
 	rows := screenRows(scr)
 	var headers []int
@@ -565,15 +654,12 @@ func TestWindowResizeGrowBackKeepsFrozenBlock(t *testing.T) {
 			headers = append(headers, r)
 		}
 	}
-	// Exactly two blocks: the frozen one and the fresh one below it.
-	if len(headers) != 2 {
-		t.Fatalf("header rows = %v, want exactly 2 (frozen block + fresh block)", headers)
-	}
-	if headers[1] <= headers[0] {
-		t.Fatalf("fresh block must start below the frozen block: %v", headers)
+	// Exactly ONE block: the reclaim overwrote the unwrapped frame in place.
+	if len(headers) != 1 {
+		t.Fatalf("header rows = %v, want exactly 1 (reclaimed in place, no frozen copy)", headers)
 	}
 	// Fresh block = header + 2 data rows at the new width: nothing below.
-	for r := headers[1] + 3; r < scr.rows; r++ {
+	for r := headers[0] + 3; r < scr.rows; r++ {
 		if got := scr.line(r); got != "" {
 			t.Errorf("row %d not blank below the fresh block: %q", r, got)
 		}
@@ -805,10 +891,14 @@ func TestWindowResizeGrowBackKeepsFrozenRows(t *testing.T) {
 	}
 }
 
-// TestWindowResizeFreezeThenRestart: on a width change the block freezes
-// (no redraws) until the width is stable for resizeSettleDelay, then
-// restarts on a fresh row below the frozen block (DECISIONS #67).
-func TestWindowResizeFreezeThenRestart(t *testing.T) {
+// TestWindowResizeCrossingReclaimsInPlace: a width change that crosses a
+// wrap boundary (a frame rendered below the essentials floor unwraps when
+// the terminal grows) is RECLAIMED in place once the width settles — no
+// writes mid-reflow, then the reflowed span is walked back and the fresh
+// frame overwrites the old one: exactly ONE block, no frozen copy, no
+// restart CRLF (SPEC-window-resize-reclaim.md; was the #67
+// freeze-then-restart test).
+func TestWindowResizeCrossingReclaimsInPlace(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
 	*wPtr = 40
@@ -825,15 +915,15 @@ func TestWindowResizeFreezeThenRestart(t *testing.T) {
 	*now = now.Add(time.Second)
 	buf.Reset()
 	w.Tick()
-	restart := buf.String()
-	if !strings.HasPrefix(restart, "\r\n") {
-		t.Errorf("restart must begin with CRLF to move below the frozen block: %q", restart)
+	repaint := buf.String()
+	if strings.HasPrefix(repaint, "\r\n") {
+		t.Errorf("reclaim must not restart on a fresh row: %q", repaint)
 	}
 
 	scr := newTermScreen(24, 40)
 	scr.feed(frame1)
-	scr.resize(100)
-	scr.feed(restart)
+	scr.reflowResize(100) // reflowing terminal: the wrapped lines unwrap
+	scr.feed(repaint)
 	rows := screenRows(scr)
 	var headers []int
 	for r, ln := range rows {
@@ -841,23 +931,24 @@ func TestWindowResizeFreezeThenRestart(t *testing.T) {
 			headers = append(headers, r)
 		}
 	}
-	// Exactly two blocks: the frozen one and the fresh one below it.
-	if len(headers) != 2 || headers[1] <= headers[0] {
-		t.Fatalf("want frozen block + fresh block below: header rows %v", headers)
+	// Exactly ONE block: the reclaim overwrote the unwrapped frame in place.
+	if len(headers) != 1 {
+		t.Fatalf("want exactly one block (reclaimed in place): header rows %v", headers)
 	}
 	// Fresh block = header + 5 data rows at the new width.
-	for r := headers[1] + 6; r < scr.rows; r++ {
+	for r := headers[0] + 6; r < scr.rows; r++ {
 		if got := scr.line(r); got != "" {
 			t.Errorf("row %d not blank below the fresh block: %q", r, got)
 		}
 	}
 }
 
-// TestWindowResizeDragKeepsFreezing: a resize drag restarts the settle
-// clock on every width change — the block stays frozen while the width
-// keeps moving and restarts exactly once after the width has been stable
-// for resizeSettleDelay (user-requested acceptance check, DECISIONS #67).
-func TestWindowResizeDragKeepsFreezing(t *testing.T) {
+// TestWindowResizeDragReclaimsOnce: a resize drag restarts the settle
+// clock on every width change — nothing writes while the width keeps
+// moving, and once it has been stable for resizeSettleDelay the crossing
+// is RECLAIMED in place exactly once: no frozen block, no restart
+// (SPEC-window-resize-reclaim.md; was the #67 drag-keeps-freezing test).
+func TestWindowResizeDragReclaimsOnce(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
 	*wPtr = 40
@@ -867,16 +958,16 @@ func TestWindowResizeDragKeepsFreezing(t *testing.T) {
 	type step struct {
 		width int
 		adv   time.Duration
-		want  string // "" = frozen, "restart" = fresh-row restart emitted
+		want  string // "" = no writes, "reclaim" = in-place repaint after settle
 	}
 	steps := []step{
 		{60, 100 * time.Millisecond, ""},        // drag: 40 → 60 (crosses the 47 floor)
 		{35, 100 * time.Millisecond, ""},        // drag: 60 → 35 (clock restarts)
 		{60, 100 * time.Millisecond, ""},        // drag: 35 → 60 (clock restarts)
 		{60, 200 * time.Millisecond, ""},        // 200ms after the LAST change: still settling
-		{60, 100 * time.Millisecond, "restart"}, // 300ms of stability: restart fires
+		{60, 100 * time.Millisecond, "reclaim"}, // 300ms of stability: reclaim fires
 	}
-	var restartOut string
+	var reclaimOut string
 	for i, s := range steps {
 		*wPtr = s.width
 		*now = now.Add(s.adv)
@@ -886,17 +977,20 @@ func TestWindowResizeDragKeepsFreezing(t *testing.T) {
 		switch s.want {
 		case "":
 			if got != "" {
-				t.Fatalf("step %d (width %d): expected frozen, wrote: %q", i, s.width, got)
+				t.Fatalf("step %d (width %d): expected no writes, wrote: %q", i, s.width, got)
 			}
-		case "restart":
-			if !strings.HasPrefix(got, "\r\n") {
-				t.Errorf("step %d: restart must begin with CRLF: %q", i, got)
+		case "reclaim":
+			if strings.HasPrefix(got, "\r\n") {
+				t.Errorf("step %d: reclaim must not restart on a fresh row: %q", i, got)
 			}
-			restartOut = got
+			reclaimOut = got
 		}
 	}
-	if restartOut == "" {
-		t.Fatal("no restart emitted after the width settled")
+	if reclaimOut == "" {
+		t.Fatal("no reclaim emitted after the width settled")
+	}
+	if strings.Contains(reclaimOut, "\x1b[0A") {
+		t.Errorf("step %d: reclaim walk-back must not be zero rows", 4)
 	}
 }
 
@@ -1032,12 +1126,13 @@ func TestWindowResizeSameBandDragNoFreeze(t *testing.T) {
 	}
 }
 
-// TestWindowResizeCrossesBandFreezes: the conditional freeze must still
-// fire when the wrap band changes (45 → 60: the 46-cell live line wraps at
-// 45, fits at 60) — a reflow moves the block then, and reclaiming it would
-// corrupt the screen (the #67 contract, now band-scoped; above the floor
-// columns drop instead, so crossings only exist below it — DECISIONS #71).
-func TestWindowResizeCrossesBandFreezes(t *testing.T) {
+// TestWindowResizeCrossingUnwrapsInPlace: the wrap band changing (45 → 60:
+// the live line wraps at 45, fits at 60) is a genuine crossing — and on a
+// reflowing terminal it is RECLAIMED in place: the wrapped frame unwraps
+// to a known span, the settle repaint walks it back and overwrites it.
+// One block, no frozen copy (SPEC-window-resize-reclaim.md; was the #70
+// band-crossing-freezes test).
+func TestWindowResizeCrossingUnwrapsInPlace(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 45, 24)
 	*wPtr = 45
@@ -1051,19 +1146,115 @@ func TestWindowResizeCrossesBandFreezes(t *testing.T) {
 	buf.Reset()
 	w.Tick()
 	if buf.Len() != 0 {
-		t.Fatalf("band-crossing resize must freeze mid-settle: %q", buf.String())
+		t.Fatalf("band-crossing resize must hold mid-settle: %q", buf.String())
+	}
+	*now = now.Add(time.Second)
+	buf.Reset()
+	w.Tick()
+	repaint := buf.String()
+	if strings.HasPrefix(repaint, "\r\n") {
+		t.Fatalf("crossing reclaim must not restart on a fresh row: %q", repaint)
+	}
+
+	scr := newTermScreen(24, 45)
+	scr.feed(frame1)
+	scr.reflowResize(60) // reflowing terminal: the wrapped lines unwrap
+	scr.feed(repaint)
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
+		}
+	}
+	if len(headers) != 1 {
+		t.Fatalf("crossing reclaim must leave exactly one block: header rows %v", headers)
+	}
+}
+
+// TestWindowResizeStaleWideFrameReclaims is the regression test for the
+// USER'S exact report (round 16, DOHPING_DEBUG log): a frame rendered at
+// 97 cols (full 79-cell lines) crosses at 75 — the reflowed span grows
+// (rows 11→12) because the STALE wide frame wraps even though a fresh
+// trimmed frame would fit. The settle must RECLAIM in place: one block,
+// no frozen copy, no restart — the three-block screenshot becomes one.
+func TestWindowResizeStaleWideFrameReclaims(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 10, false, false, 97, 24)
+	*wPtr = 97
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	frame1 := buf.String()
+
+	*wPtr = 75
+	*now = now.Add(100 * time.Millisecond) // mid-reflow: nothing written
+	buf.Reset()
+	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("mid-reflow write: %q", buf.String())
+	}
+	*now = now.Add(time.Second) // settled
+	buf.Reset()
+	w.Tick()
+	repaint := buf.String()
+	if repaint == "" || strings.HasPrefix(repaint, "\r\n") {
+		t.Fatalf("settled crossing must reclaim in place: %q", repaint)
+	}
+
+	scr := newTermScreen(24, 97)
+	scr.feed(frame1)
+	scr.reflowResize(75) // reflowing terminal: the stale 97-frame wraps
+	scr.feed(repaint)
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
+		}
+	}
+	if len(headers) != 1 {
+		t.Fatalf("stale-frame crossing must leave exactly one block: header rows %v", headers)
+	}
+	// The fresh block is trimmed at 75 (retained 3 → no FAILS column) and
+	// every line fits one row: the live line sits directly under the header.
+	if !strings.HasPrefix(scr.line(headers[0]+1), "11:00:35") {
+		t.Errorf("live line not directly under the header after reclaim: %q", scr.line(headers[0]+1))
+	}
+}
+
+// TestWindowResizeBelowFloorSettleFreezes: when a crossing SETTLES below
+// the essentials floor, the fresh frame itself wraps and its reflowed
+// anchor is unknowable — the freeze fallback still fires: the block
+// restarts on a fresh row below the frozen rendering (two blocks), the
+// pre-reclaim behavior (SPEC-window-resize-reclaim.md §3.2).
+func TestWindowResizeBelowFloorSettleFreezes(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	frame1 := buf.String()
+
+	*wPtr = 40
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("mid-settle redraw produced output: %q", buf.String())
 	}
 	*now = now.Add(time.Second)
 	buf.Reset()
 	w.Tick()
 	restart := buf.String()
 	if !strings.HasPrefix(restart, "\r\n") {
-		t.Fatalf("band-crossing restart must begin with CRLF: %q", restart)
+		t.Fatalf("below-floor settle must restart on a fresh row: %q", restart)
 	}
 
-	scr := newTermScreen(24, 45)
+	scr := newTermScreen(24, 60)
 	scr.feed(frame1)
-	scr.resize(60)
+	scr.reflowResize(40) // reflowing terminal: the 60-frame wraps below the floor
 	scr.feed(restart)
 	rows := screenRows(scr)
 	var headers []int
@@ -1073,7 +1264,48 @@ func TestWindowResizeCrossesBandFreezes(t *testing.T) {
 		}
 	}
 	if len(headers) != 2 || headers[1] <= headers[0] {
-		t.Fatalf("band-crossing resize must leave frozen block + fresh block below: header rows %v", headers)
+		t.Fatalf("below-floor settle must leave frozen block + fresh block below: header rows %v", headers)
+	}
+}
+
+// TestWindowResizeFinalizeReclaims: quitting mid-crossing forces the
+// render — the final block is RECLAIMED in place (one block, then the
+// summary's CRLF), not restarted on a fresh row.
+func TestWindowResizeFinalizeReclaims(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 97, 24)
+	*wPtr = 97
+	w.Handle(changeEvent(t0, state.StatusUp))
+	frame1 := buf.String()
+
+	*wPtr = 75
+	*now = now.Add(100 * time.Millisecond) // mid-settle
+	buf.Reset()
+	w.Finalize()
+	out := buf.String()
+	if out == "" {
+		t.Fatal("finalize must force the render")
+	}
+	if !strings.HasSuffix(out, "\r\n") {
+		t.Fatalf("finalize must end with CRLF for the summary: %q", out)
+	}
+	if strings.HasPrefix(out, "\r\n") {
+		t.Fatalf("finalize must not restart on a fresh row (reclaim in place): %q", out)
+	}
+
+	scr := newTermScreen(24, 97)
+	scr.feed(frame1)
+	scr.reflowResize(75)
+	scr.feed(out)
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
+		}
+	}
+	if len(headers) != 1 {
+		t.Fatalf("finalize mid-crossing must leave exactly one block: header rows %v", headers)
 	}
 }
 
@@ -1166,7 +1398,7 @@ func TestWindowResizeDebugForensics(t *testing.T) {
 		}
 	})
 
-	t.Run("band crossing freezes then restarts", func(t *testing.T) {
+	t.Run("band crossing reclaims in place", func(t *testing.T) {
 		var buf bytes.Buffer
 		w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 45, 24)
 		*wPtr = 45
@@ -1182,15 +1414,18 @@ func TestWindowResizeDebugForensics(t *testing.T) {
 		if buf.Len() != 0 {
 			t.Fatalf("crossing mid-reflow write: %q", buf.String())
 		}
-		*now = now.Add(time.Second) // width stable: restart below the frozen block
+		*now = now.Add(time.Second) // width stable: reclaim in place
 		buf.Reset()
 		w.Tick()
 		log := dbg.String()
-		if !strings.Contains(log, "45→60") || !strings.Contains(log, "FREEZE") {
+		if !strings.Contains(log, "45→60") || !strings.Contains(log, "crossing") {
 			t.Errorf("crossing decision not logged: %q", log)
 		}
-		if !strings.Contains(log, "restart below frozen block") {
-			t.Errorf("freeze restart not logged: %q", log)
+		if !strings.Contains(log, "reclaim in place") {
+			t.Errorf("reclaim decision not logged: %q", log)
+		}
+		if !strings.Contains(log, "reclaimed tw=60") {
+			t.Errorf("reclaimed repaint not logged: %q", log)
 		}
 	})
 }
