@@ -1,105 +1,56 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (73 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (78 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
+`SPEC-window-resize-reclaim.md` is the design for the shipped resize behavior.
 
-**Status: build complete. All 6 phases green. Acceptance rounds 1–11 shipped
-(DECISIONS #50–69, 2026-08-17/18). Round 8's CPR re-anchor (#66) FAILED the
-user's real-terminal test ("still not working") and was replaced in round 9
-(#67) by freeze-and-restart: on a width change the displays pause in-place
-updates until the width is stable (300ms, restarted by every further change),
-then continue on a fresh row below the frozen re-wrapped rendering — the old
-rendering stays in scrollback as history. Root cause of the #66 failure:
-the user's terminal is Windows Terminal → WSL2 → Debian, and the DSR/CPR
-answer comes from ConPTY, whose reflow differs from the rendered view
-(microsoft/terminal#18725 — "wildly incorrect cursor positions"). Round 10
-(#68) confirmed working on the user's screen ("It is doing it") and added:
-the frozen row is marked with a single `-` (safe only when the line was one
-row before and after the resize), and STATUS → STATE with `?` for the
-never-established status — the minimum line dropped from 81 to 79 cells,
-under 80. #67/#68 are position-independent and fully sandbox-tested; the
-user's own terminal test was the remaining gate and is now CLOSED for plain
-view (DECISIONS #69, 2026-08-18: "the last change for the plain view appears
-to be working on resize and provides a much nicer visual" — frozen `-` rows
-stay in scrollback, live line continues fresh below; 5 stacked frozen rows
-observed under repeated resizing). User-verified so far: window mode in
-place, flags on either side of HOST, bare-seconds interval/timeout, clean
-exit summary, the liveness animation, the window-mode resize fix, and the
-freeze/restart resize behavior (both views, incl. the `-` mark in plain).**
-Round 12 (DECISIONS #70, 2026-08-18): the #67 freeze is now CONDITIONAL in
-WINDOW mode — it fires only when the reflow would actually MOVE the block
-(any row of the last completed frame changes its physical row count at the
-new width). The user's window is ~55–60 cols (below the 79-cell floor;
-screenshot: AVG 3.92 wraps mid-value), and #67's unconditional trigger
-froze on EVERY resize there, stacking a whole frozen block per width
-change. Same-band resizes (60→55: 12 rows at both widths) now repaint IN
-PLACE — no artifact. Plain display UNCHANGED per user ("plain view is plain
-view"). Superseded for window mode by the round-13 trim (below).
-Remaining gate: the user's real-terminal test of the same-band window
-repaint (built 2026-08-18, dist sha 466b95c0…).
-Round 13 (DECISIONS #71, 2026-08-18): WINDOW-MODE COLUMN TRIM — below the
-79-cell line minimum the rightmost columns (FAILS→AVG→MAX→MIN) drop so the
-line keeps fitting instead of wrapping, down to essentials (46 cells).
-User: "my terminal doesn't live in any band, I am testing so use it
-accordingly" — the #70 freeze only separates same-band from crossing, and
-free testing crosses constantly; trimming eliminates the crossings
-themselves. Resize behavior is now UNIFORM: at any width ≥ 46 a resize is
-an in-place repaint with zero artifacts; the freeze is reachable only
-below 46. Plain untouched.
-Round 14 (DECISIONS #72, 2026-08-18): USER ACCEPTED the trim ("This works
-much better") with a caveat — "sometimes it still wraps… This may have to
-be lived with, with a note specifying resizing terminals can cause output
-to fracture". The README now carries that note with the three named
-mechanisms: (a) reflowing-terminal drag race (the app samples width on the
-1s tick; a fast drag jumps through trim thresholds unseen and the terminal
-reflows the old rendering regardless — transient wrapped/duplicated rows,
-self-correcting on the next repaint); (b) below ~46 cols the essentials
-wrap by design; (c) RTT ≥ 10,000 ms overflows the 7-cell RTT fields
-(verified: "10000.00" = 8 cells) and widens the line. Docs-only; optional
-future mitigations (RTT clamp, big-jump conservative freeze) recorded but
-NOT built. dist sha 5d79fd9b….
-Round 15 (DECISIONS #73, 2026-08-18): SAME-BAND REPAINTS ARE DEFERRED — a
-new deferPending state waits out the 300ms settle after ANY width change
-before the in-place repaint (each further change restarts the clock);
-nothing is written mid-reflow, and no event-timed redraw can land on a
-canvas that is still moving (the user's "when it wraps it creates another
-area to write to" — an event redraw lands a row off, the block shifts and
-claims the new row). Same-band blocks never restart and leave no frozen
-artifact. Finalize forces the render. README note updated (the residual
-ConPTY cursor-placement race after the reflow settles remains the
-documented floor). dist sha 44c82b29….
-Round 16 (DECISIONS #74, 2026-08-18): DEBUG LOGGING FACILITY — new
-`internal/debugx` package, enabled ONLY by `DOHPING_DEBUG=<path>` (or
-`SetWriter` in code/tests), file-only (the display owns the terminal),
-0600, RFC3339-ms `[tag]` lines. Hook points are the app's own width
-observations: `display` (mode), `winch` (SIGWINCH), `tick` (1s repaint),
-`resize` (every width change + freeze/defer decision with physical-row
-counts), `redraw` (suppressed/deferred/released/restarted + the settle
-repaint's phys span). The user's point: no terminal displays the width
-while resizing, so a drag's sweep is reconstructable only from the app's
-log — screenshots and pastes can't show it. End-to-end proof via the PTY
-probe (window-same-band): winch → resize 60→55 rows 11→11 → defer →
-two suppressed redraws → defer released → repainted tw=55 phys=11 (was
-11). gosec G703 annotated (taint twin of G304, same operator boundary).
-dist sha e1221b96….
-Round 17 (DECISIONS #75, 2026-08-18): REFLOW-AWARE IN-PLACE RECLAIM —
-user-approved option A (SPEC-window-resize-reclaim.md; B = revert #73
-pre-agreed if the user's terminal test fails). A settled crossing above
-the essentials floor is reclaimed in place: R = reflowedSpan(lastRows,
-tw), walk back R−1, overwrite with the fresh trimmed frame, clear R−N
-stale rows. No frozen copy, no restart, no scrollback reliance — §8.5
-satisfied. The freeze survives only below the floor (fresh frame wraps)
-or R > th. Finalize reclaims (forceRender). Same-band defer unchanged.
-The user's exact round-16 case (97→75, rows 11→12) is now a regression
-test: ONE block. termScreen gained a REFLOWING resize mode (logical-line
-tracking + reflowResize) as the model for the user's terminal; crossing
-tests re-based to it; below-floor settle freeze (60→40) kept; PTY probe
-window-subfloor → 50→40 (settles below the floor — deterministic on the
-non-reflowing sandbox pty); all 4 probe scenarios PASS. Honest residue:
-non-reflowing crossings are a documented limitation (the world is
-undetectable; CPR lies on ConPTY — the reclaim chooses the user's
-reflowing world). dist sha 8dcce21a….
+**Status: build complete. All 6 phases green. Window-mode resize is RESOLVED —
+the reflow-aware in-place reclaim is SHIPPED (DECISIONS #78; dist sha
+8dcce21a…, byte-reproduced via `release.sh`).**
+
+## Resize behavior — the current contract (window mode)
+
+- The block writes NOTHING while the width is moving (300 ms settle; every
+  further change restarts the clock).
+- **Above the essentials floor (~46 cols):** every width change — same-band
+  OR crossing — settles to exactly ONE clean block in place. A crossing
+  RECLAIMS: the terminal reflowed the on-screen frame to
+  R = Σ physicalRows(cellWidth(row), tw) and the cursor followed its content,
+  so the block's top is exactly R−1 rows above the cursor — walk back R−1,
+  overwrite with the fresh trimmed frame, clear R−N stale rows. No frozen
+  copy, no restart, no scrollback reliance (SPECIFICATION.md §8.5).
+- **Below the floor** (the fresh frame itself wraps; its reflowed anchor is
+  unknowable) and when R > terminal height: the freeze → restart-below
+  fallback (one frozen copy stays in scrollback).
+- **Plain view: UNCHANGED** — its freeze-and-restart with the `-` mark stays
+  user-approved (DECISIONS #69).
+- The column trim (#71) stays: below 79 cells the rightmost columns drop
+  (FAILS→AVG→MAX→MIN) so the line keeps fitting.
+
+**Accepted residual (documented in README):** mid-drag the terminal re-wraps
+the stale on-screen rendering (transient, unavoidable without writing
+mid-reflow); a settle repaint can land one row off if ConPTY's physical cursor
+is off after the reflow — self-corrects on the next repaint. Non-reflowing
+terminals (xterm, tmux, the sandbox PTY): the crossing reclaim is a documented
+limitation (the reflow/non-reflow world is undetectable — CPR lies on ConPTY,
+microsoft/terminal#18725; the reclaim chooses the user's reflowing world).
+
+## How it got here (landmarks; full rationale in DECISIONS.md)
+
+| Round | Fix | Outcome |
+|---|---|---|
+| 9–11 (#67–69) | Freeze-and-restart after CPR re-anchor (#66) failed on ConPTY | plain view user-approved (#69) |
+| 12 (#70) | Conditional freeze — only when the reflow would move the block | superseded by the reclaim |
+| 13 (#71) | Column trim (the user's idea) | kept |
+| 15 (#73) | Defer same-band repaints | REVERTED — stale frames moved the freeze above the floor |
+| 16 (#74) | `DOHPING_DEBUG` debug-log facility (the evidence path) | kept |
+| 17 (#75) | Reflow-aware in-place reclaim | SHIPPED after retest |
+| 18–19 (#76–78) | B elected on a STALE-BINARY report, then rejected on direct test; reclaim promoted | reclaim shipped (#78) |
+
+The #76 rejection was the unversioned-filename trap (Windows renames
+same-name re-downloads) — fixed in §6. The debug log (#74) remains the
+evidence path for any future resize report.
 
 ---
 
@@ -121,27 +72,24 @@ and stage-marking; if in doubt, ASK, don't assume).
 
 - **Plain line mode**: header, columns, live line updates in place, finalization
   on status change, non-TTY hygiene. Up line byte-identical to spec §7.4 example.
-- **Window mode** (`--window`, `--window-lines N`) — **user-confirmed working
-  2026-08-17** after fixes #53/#54: renders IN PLACE on the normal terminal,
-  no alternate screen, no screen clearing, block stays after exit, summary below.
-  **Resize is now artifact-free at any width ≥ 46 (DECISIONS #71)**: below the
-  79-cell line minimum the rightmost columns drop (FAILS→AVG→MAX→MIN) so the
-  line never wraps — a resize is always an in-place repaint with no frozen
-  block; only below 46 cells (where the essentials line wraps) does the
-  conditional freeze (#70) fire. Proven in-unit and in the real-PTY probe
-  (`window` 60→100: one block, in place; `window-subfloor` 40→70: freeze).
+- **Window mode** (`--window`, `--window-lines N`) — user-confirmed 2026-08-17
+  (#53/#54): renders IN PLACE on the normal terminal, no alternate screen, no
+  screen clearing, block stays after exit, summary below. **Resize: reclaim
+  shipped (#78)** — above the 46-cell floor every width change settles to one
+  clean block (same-band and crossings alike); below the floor the conditional
+  freeze → restart below (one frozen copy). Proven in-unit through the REFLOWING
+  emulator model (`reflowResize`) and the real-PTY probe (all 4 scenarios PASS).
 - **Flags on either side of HOST** (`dohping google.com -c 5` == `-c 5 google.com`)
   — GNU-style permutation (#55). `--` still terminates flags.
 - **`-i`/`-t` accept bare seconds** (`-i 5` = 5s, ping convention) plus full
   duration strings (`500ms`, `1m30s`) (#57). Zero/negative still rejected.
 - **Exit summary is a clean left-aligned block** at column 0 even on terminals
   without ONLCR — explicit `\r` per line, `\r\n` terminators (#56).
-- **Liveness animation**: live line shows a rising bar `▁▃▅▇` in the DURATION
-  field's padding (column 45 at the HOST-15 minimum, floats between DURATION
-  and MIN). Advances on a
-  fixed 1-SECOND timer independent of probe cadence, and the tick ALSO refreshes
-  DURATION from the wall clock (#59–61). Finalized/history/piped lines stay
-  plain (spec §7.4 byte-identical). Verified in PTY capture at `-i 5`.
+- **Liveness animation**: rising bar `▁▃▅▇` in the DURATION field's padding
+  (column 45 at the HOST-15 minimum), advancing on a fixed 1-SECOND timer
+  independent of probe cadence; the tick ALSO refreshes DURATION from the wall
+  clock (#59–61). Finalized/history/piped lines stay plain (spec §7.4
+  byte-identical).
 - **Timestamp at default intensity** (was dim) (#58).
 - **Three-tier ICMP**: raw socket → ping socket → system `ping`. Verified live:
   `1.1.1.1` up ~8ms, `::1` up (ICMPv6), `192.0.2.1` down (deterministic timeout).
@@ -149,71 +97,44 @@ and stage-marking; if in doubt, ASK, don't assume).
   problems abort exit 3 + hint (never misreported as host-down).
 - **Signals**: SIGINT→130, SIGTERM→143, q-quit→0, `--count`→0.
 - **Cross-compile matrix**: linux/darwin/windows × amd64/arm64 in `dist/`,
-  reproducible via `scripts/release.sh`.
+  reproducible via `scripts/release.sh` (verified: round-17 source reproduces
+  the shipped sha byte-for-byte).
 - **Gates**: 7/7 packages race-clean (`go test -race -count=1 ./...`),
   gofmt/vet clean, golangci-lint + staticcheck + **gosec 2.28.0** all clean
-  (gosec round #63: log file now 0600; 2 justified `#nosec`).
+  (gosec round #63: log file now 0600; justified `#nosec`; #74 added G703 to
+  the debugx annotation).
 
-## 3. Acceptance fixes (DECISIONS #50–63, all shipped)
+## 3. Acceptance fixes worth remembering
 
 | # | Fix | User report it answered |
 |---|---|---|
-| 50 | Consecutive errors don't re-enter error state; `EventProbeError` updates live line duration in place | "error status repeated on a new line" |
-| 51 | Permission-class probe errors abort exit 3 + hint (all tiers, incl. ping exit-2 wrapped as EPERM) | "ping can tell you there is a priv problem straight away" |
-| 52 | MIN/MAX/AVG/FAILS left-aligned under headers | "MIN, MAX and AVG columns are not in place" |
 | 53 | Window mode in place on normal terminal, no alt-screen/clear | "nothing about clearing the screen... at place at the screen" |
 | 54 | Explicit column reset: `\x1b[<n>A\r` on redraw, `\r\n` between rows | fragmented rows (`348.00 348.00 348.00` / repeated headers) |
-| 55 | Flags on either side of HOST (GNU-style permutation) | "options/flags should be placeable either side of a ping target" |
-| 56 | Live finalize ends `\r\n`; exit summary `\r`-prefixed + `\r\n`-terminated | "once the time is up it loses formatting" |
-| 57 | `-i`/`-t` accept bare seconds + duration strings, helpful error hint | "`--interval 5` / `-i 5`: parse error" |
-| 58 | Timestamp at default intensity (was dim) | "color selected for time field is a bit dim" |
-| 59–61 | Liveness animation: rising bar `▁▃▅▇` at col 47, 1s ticker independent of probe cadence, tick refreshes DURATION | "needs something more visible to show it is working" / "blocks are not appearing in the right place" / "display needs to run every second" / "why doesn't duration update on the same schedule?" |
-| 62 | Docs: README "Timing model" note (first probe immediate; duration measured) | "it feels like it should be 5 secs… needs a value + 1" (rejected — see DECISIONS) |
-| 63 | gosec 2.28.0 clean: log 0600, TCP close discarded, 2 justified `#nosec` | "we need gosec" |
-| 64 | Terminal resize handled, platform-split: HOST elastic column (content-fit, terminal-capped, min 15 max 40, `…`), rune-based cell math, window re-measures every redraw, PHYSICAL-row cursor math (wrapped blocks stay coherent); Unix SIGWINCH fast path, Windows self-heals via the 1s tick | "Not handling terminal resize - breaks output" + "must be handled based on platform" |
-| 65 | Plain live line width-aware: same physical-row primitive reduced to one row — lastPhysRows + walk-back + defensive clear (live rewrite AND finalize); HOST stays fixed (scrollback consistency); piped/--no-live untouched; plain mode gains SIGWINCH fast path. Latent fix: stale-clear resets column (`\x1b[1B\r\x1b[K`) — cursor-down preserves the column, so non-blank last rows left stale text (window full-block case too) | "plain mode also needs to be width aware for the current live line only" + user's lastPhysRows design |
-| 66 | REFLOWING-terminal re-anchor via DSR/CPR (root fix for "creep up / does not clear the rest on wrap"): on width change, query the cursor (`\x1b[6n` → `\x1b[<r>;<c>R`, app-owned, key reader parses CSI, 150ms timeout, degrade on no-answer); cursor sits at the end of the re-wrapped line → recompute anchor. Discriminator: CPR row == bookkeeping expectation → no reflow → non-reflowing terminals byte-identical to #65. Both displays (plain live + window block — retires the #64 window creep too). x/term Windows MakeRaw sets ENABLE_VIRTUAL_TERMINAL_INPUT (verified) | "It can creep up and does not clear the rest on wrap" + option A chosen ("lets try your recommendation") |
-| 70 | Window-mode resize freeze is CONDITIONAL: freeze only when the reflow would move the block (any row of the last completed frame changes its physical row count at the new width — observeResize compares Σ physicalRows(lastRows, newW) vs lastPhysRows); same-band resizes repaint in place, no frozen block left behind. Pending freeze still restarts the settle clock on every further width change (drag behavior unchanged). PLAIN display untouched. User's column-trim idea parked (window mode may be rethought) | "This happens on resize window mode, making it less wider causes it" — user's ~55–60 col terminal stacked a frozen block per width change; #67 froze on every change even when the layout absorbed it (60→55 = 12 rows both widths; same-band lines cannot move in a reflow — the #68 safety reasoning generalized). Screenshot proved AVG 3.92 wrapping mid-value |
-| 71 | WINDOW-MODE COLUMN TRIM (the user's original idea): below the 79-cell line minimum the rightmost columns drop (FAILS→AVG→MAX→MIN, header in sync) so the line fits instead of wrapping — down to essentials TIME/HOST/STATE/DURATION (46 cells; the live line's animation frame keeps DURATION untrimmed). HOST retracts first (#64), then columns. Plain untouched. Combined with #70, window-mode resize is now a uniform in-place repaint at any width ≥ 46 — the freeze is only reachable below 46 | "My terminal doesn't live in any band, I am testing so use it accordingly" — #70 only separated same-band from crossing, and free testing crosses constantly; trimming eliminates the crossings themselves. Built after the conditional freeze proved invisible to the user's testing |
-| 74 | Optional debug logging facility (`internal/debugx`): no-op by default, enabled ONLY by `DOHPING_DEBUG=<path>` (or `SetWriter` in code/tests); appends RFC3339-ms `[tag]` lines to a 0600 file. Tags: `display` (mode), `winch` (SIGWINCH), `tick` (1s repaint), `resize` (every width change + freeze/defer decision with physical-row counts), `redraw` (suppressed/deferred/released/restarted + settle repaint's phys span — a shifted block = span mismatch). A path that cannot be opened disables with a stderr warning (never breaks a run); file-only because the display owns the terminal. Verified end-to-end via the PTY probe: winch → resize 60→55 rows 11→11 → defer → 2 suppressed redraws → defer released → repainted tw=55 phys=11 (was 11) | "Have you even seen a terminal tell you the width you are resizing to?" — no terminal displays the width during a drag; asking the user to report widths or whether the drag "dipped below 46" asked them to read a display that doesn't exist (same class of mistake as paste-blindness). The app is the only instrument that sees every width in the sweep, so the evidence must come from its own log. "Add it, perhaps we should have had a facility for a debug logger already, just only enabled by code or ENV" — general facility (env-or-code), of which the resize forensics are the first consumers. gosec G703 annotated (taint twin of G304 on the same line; operator trust boundary identical to `--log-file`, #63 precedent) |
-| 75 | REFLOW-AWARE IN-PLACE RECLAIM (user-approved A; B = revert #73 pre-agreed on failure): a settled crossing above the essentials floor is reclaimed in place — R = reflowedSpan(lastRows, tw) (the same sum the crossing check already computed), walk back R−1 from the cursor (it follows its content through the reflow), overwrite with the fresh trimmed frame, clear the R−N stale rows. No frozen copy, no restart, no scrollback reliance — SPECIFICATION.md §8.5 finally satisfied. Freeze remains only below the floor (fresh frame wraps; anchor unknowable) or when R > th; Finalize reclaims (forceRender); same-band defer (#73) unchanged; plain untouched. Debug log: crossing → reclaim in place (R/N/tw) → reclaimed. Regression: termScreen gains logical-line tracking + reflowResize (reflowing model); crossing tests re-based (40→100, 40→120, 45→60, drag, the user's 97→75 → ONE block); below-floor settle 60→40 → freeze (two blocks); PTY probe window-subfloor → 50→40, all 4 scenarios PASS. Non-reflowing crossings: documented limitation (world undetectable; CPR lies on ConPTY — the reclaim chooses the user's reflowing world) | "It is neither a defense or true. It is clear not what was required" — §8.5's "should not rely on normal terminal scrollback" was violated by #67's freeze-and-restart, and I documented the deviation instead of meeting the contract (same failure as "as specified"); "Why wouldn't you write the way the spec you didn't write specified?" — the spec had it right; the obstacle was my misdiagnosis: #18725 poisons CPR *answers*, not the physical cursor, which follows content (evidence: the round-16 restart landed correctly below the reflowed frame — the reclaim's exact assumption). User: "If we do A and it fails again, we do B." Gates: gofmt/vet, 7/7 race-clean, golangci-lint + staticcheck + gosec clean. dist sha 8dcce21a…; gate = user's real-terminal drag test |
+| 64 | Resize handled, platform-split: HOST elastic (content-fit, min 15 max 40, `…`), rune-based cell math, re-measure every redraw, PHYSICAL-row cursor math, SIGWINCH fast path / Windows 1s-tick self-heal | "Not handling terminal resize - breaks output" + "must be handled based on platform" |
+| 65 | Plain live line width-aware (lastPhysRows walk-back + defensive clear); stale-clear resets column first | "plain mode also needs to be width aware for the current live line only" + user's lastPhysRows design |
+| 66 | DSR/CPR re-anchor — **FAILED** on ConPTY (#18725), replaced by #67 | "It can creep up and does not clear the rest on wrap" |
+| 67–69 | Freeze-and-restart (both views); `-` mark + STATUS→STATE/`?` (line 81→79 cells) | plain view user-approved ("much nicer visual") |
+| 71 | WINDOW-MODE COLUMN TRIM: rightmost columns drop below 79 cells so the line fits instead of wrapping (down to essentials, 46 cells) | "My terminal doesn't live in any band, I am testing so use it accordingly" |
+| 74 | `DOHPING_DEBUG=<path>` debug-log facility (`internal/debugx`, 0600, RFC3339-ms `[tag]` lines) — the app's own width telemetry | "Have you even seen a terminal tell you the width you are resizing to?" + "we should have had a facility for a debug logger already, just only enabled by code or ENV" |
+| 75/78 | REFLOW-AWARE IN-PLACE RECLAIM (shipped): crossings above the floor reclaim in place — one block, no frozen copy (SPEC-window-resize-reclaim.md) | "It is neither a defense or true. It is clear not what was required" (§8.5: no scrollback reliance) |
+| 76–77 | B episode: wrongly rejected on a stale binary, properly retested, promoted | "0014967e is out… This one should be set as the shipped build" |
+
+Full per-fix history: DECISIONS.md (78 entries, each with rationale).
 
 ## 4. Pending / next actions
 
-- **User confirmed the plain-view resize fix on the real terminal (2026-08-18,
-  DECISIONS #69)** — freeze-and-restart reads well ("much nicer visual").
-- **Round 17 (#75, REFLOW-AWARE RECLAIM) shipped 2026-08-18 (dist sha
-  8dcce21a…). GATE: the user's real-terminal drag test.** Run with
-  `DOHPING_DEBUG=/tmp/dohping-debug.log`; the log must show `crossing →
-  reclaim in place (R=… N=… tw=…) → reclaimed tw=…` and the screen must
-  settle to ONE block. **On FAIL: option B is pre-agreed — revert #73
-  (the defer) back to the round-13/14 accepted state.** If the user
-  reports another acceptance issue: reproduce, fix, add regression test,
-  re-run gates, rebuild `dist/` via `scripts/release.sh`, republish to
-  the rig (§6), record DECISIONS + CHECKPOINT entries, commit.
+- **Resize: RESOLVED and SHIPPED (#78).** If a resize report comes back, the
+  evidence path is the debug log (`DOHPING_DEBUG=<path> dohping --window HOST`
+  — tags `winch`/`tick`/`resize`/`redraw`, incl. `reclaim in place (R=… N=…
+  tw=…)` and `reclaimed tw=… phys=… (was …)`) plus the reflow-emulator tests —
+  never ask the user for widths or paste geometry (paste blindness, §7).
 - **HELD PLAN — reusable terminal test rig** (idea user-approved 2026-08-18,
   build explicitly on hold until user says go): full plan in §10.
-- **Animation is user-testing territory**: the rising-bar placement (col 47) and
-  the 1-second ticker were both corrected after user reports — if placement or
-  cadence comes up again, verify against the rendered-screen tests first.
-- **Resize is user-testing territory**: the #64/#65/#67/#68 work (HOST column
-  retraction/expansion, `…` truncation at min width, below-floor wrap
-  staying coherent, plain live line staying anchored, freeze-and-restart with
-  the `-` mark) was proven in-unit and in a real PTY
-  (scripts/pty-resize-probe.py — `window` and `plain` scenarios), and the
-  plain-view behavior is now user-confirmed (#69); window mode's frozen-block
-  behavior was confirmed in round 10. If a resize report comes back, re-verify
-  against the width-injected window/display tests first.
-- **No terminal cooperation is relied on** (#67): freeze-and-restart is
-  position-independent and needs no DSR/CPR answer — identical on reflowing
-  and non-reflowing terminals. Piped stdin or a dumb terminal degrades to
-  no-live/plain behavior. Windows Terminal: the Windows binary is still
-  never run; first Windows smoke should resize in window mode to confirm.
-- Areas the user has NOT explicitly verified yet (candidates to probe if asked):
-  TCP probe mode (`-p tcp`), `--log-file` output (now 0600 — user may notice),
-  `--timestamp-format rfc3339`, the darwin/windows binaries (built but never run
-  on those OSes — Windows signal codes are documented as closest-conventional,
-  spec §18; Windows resize relies on the 1s tick, never run there either).
+- **Unverified-forever candidates** (probe if asked): TCP probe mode (`-p tcp`),
+  `--log-file` output (now 0600), `--timestamp-format rfc3339`, the
+  darwin/windows binaries (built but never run on those OSes — Windows signal
+  codes are closest-conventional, spec §18; Windows resize relies on the 1s
+  tick, never run there either).
 - Proposed but not done: adding gosec to `scripts/release.sh` as an automatic
   gate (user hasn't answered the offer).
 
@@ -241,21 +162,20 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   remote-gateway mode). Serve root: `/home/hermes/.hermes/user/rig/served/`.
 - Published at `https://files.hermes.home/dohping/` (basic auth: user `hermes`,
   password in Hermes memory — re-share only if user asks).
-- **VERSIONED FILENAMES (2026-08-18 lesson)**: every build is ALSO published
-  as `dohping-<os>-<arch>-<sha8>` (e.g. `dohping-linux-amd64-0014967e`) plus
-  an `INDEX.txt` build history. The plain name is the latest SHIPPED build.
-  Windows renames same-name re-downloads ("(1)"), which once caused a
-  stale-binary test to wrongly reject a build — never rely on the plain
-  name alone for a test round; tell the user the exact versioned filename
-  (or the sha) to download. As of round 18: `dohping-linux-amd64-0014967e`
-  = shipped B; `dohping-linux-amd64-8dcce21a` = round-17 reclaim, published
-  as EXPERIMENTAL pending a proper retest (the original rejection may have
-  tested a stale file).
+- **VERSIONED FILENAMES (2026-08-18 lesson)**: every build is ALSO published as
+  `dohping-<os>-<arch>-<sha8>` plus an `INDEX.txt` build history. The plain
+  name is the latest SHIPPED build. Windows renames same-name re-downloads
+  ("(1)"), which once caused a stale-binary test to wrongly reject a build —
+  never rely on the plain name alone for a test round; tell the user the exact
+  versioned filename (or the sha) to download. Current: plain name AND
+  `dohping-linux-amd64-8dcce21a` = shipped reclaim; `dohping-linux-amd64-0014967e`
+  = REJECTED B, retained as a versioned artifact.
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
-  https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `8dcce21a73fa…` (2026-08-18, round #75:
-  reflow-aware in-place reclaim; served = dist, verified byte-identical over TLS).
+  https://files.hermes.home/dohping/dohping-linux-amd64` → 200, and compare
+  `sha256sum` served-vs-dist.
+- Current published linux-amd64 sha: `8dcce21a73fa…` (2026-08-18, round #78:
+  reflow-aware reclaim SHIPPED; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works
@@ -274,57 +194,39 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   and, where line-column drift is possible, the no-ONLCR one.
 - Animation tests: the live-line frame lives at column 47 and advances on the
   1-second `Tick()` (driven by the app loop's timer, not probe events) — unit
-  tests drive `Tick()` directly with an injected clock; the rendered-screen
-  assertions in `display_test.go`/`window_test.go` cover placement and
-  history-vs-live separation.
-- Resize tests: inject a terminal width via the window's `sizeFn` (helper
-  `newTestWindowResizable`), render through `termScreen` (which now simulates
-  DECAWM autowrap) and assert the visible grid at 120/79/60/45/40 cols —
-  expansion, retraction, `…` truncation, below-floor wrap coherence,
-  stale-row clearing. Since #71 the floor is 46 cells (the essentials line;
-  the live line's animation frame keeps DURATION untrimmed): at ≥46 a width
-  change must repaint in place with exactly ONE block (60→55, 60→100,
-  120→79, drag 55→65→60); below 46 the band rules apply — same-band repaints
-  (40→45), crossing freezes (40→100, 45→60, drag 40→60→35→60).
+  tests drive `Tick()` directly with an injected clock.
+- Resize tests: inject a terminal width via `newTestWindowResizable`, render
+  through `termScreen` (DECAWM autowrap). The emulator models BOTH worlds:
+  `resize()` = non-reflowing (xterm-style, existing tests) and `reflowResize()`
+  = reflowing (logical-line re-wrap, cursor follows content — the user's
+  terminal; the reclaim tests). Above the 46-cell floor: ANY width change
+  (same-band or crossing: 60→55, 60→100, 120→79, the user's 97→75, 40→100,
+  45→60, drag 55→65→60) settles to exactly ONE block. Below the floor:
+  same-band wraps in place (40→45), crossings freeze → two blocks (60→40).
 - **Real-PTY resize proof**: `python3 scripts/pty-resize-probe.py` spawns the
-  built binary in a pty and renders the capture through a VT emulator,
-  printing the visible screen + raw-stream forensics (cursor-up counts,
-  restart CRLFs). Scenarios: `window` (60→100 mid-run — the line is trimmed
-  at 60 so it never wraps: proves the block repaints IN PLACE, exactly one
-  header, #71), `window-subfloor` (40→70 mid-run — a genuine wrap-count
-  change below the floor: proves the conditional freeze fires and restarts
-  below the frozen rendering, two headers, #67/#70), `window-same-band`
-  (60→55 — one block), and `plain` (fixed 60-col pty — live line anchored at
-  row 2 across a multi-second run). Run it against a FRESH build (`rm -f`
-  the output first — stale-build trap; the probe's binary path is hardcoded
-  to /tmp/dohping-test).
+  built binary in a pty and renders the capture through a VT emulator. Scenarios:
+  `window` (60→100 — in place, one header), `window-same-band` (60→55 — one
+  block), `window-subfloor` (50→40 — SETTLES BELOW the floor: crossing freeze →
+  two headers; the non-reflowing sandbox pty cannot exercise an above-floor
+  reclaim), `plain` (fixed 60-col pty — live line anchored at row 2). Run it
+  against a FRESH build (`rm -f` the output first — stale-build trap; the
+  probe's binary path is hardcoded to /tmp/dohping-test).
 - **PASTE BLINDNESS (2026-08-18 lesson)**: the user's terminal (Windows
   Terminal → WSL2) copies a WRAPPED line as one logical line — no newline at
   the wrap point — so a pasted line of N cells does NOT prove it fit in N
   columns. Never conclude "no wrap / no reflow" from a user's paste geometry;
   the user's own screen is the evidence (they send screenshots now). Pastes
   are weak evidence; the emulator tests and PTY probe are the proof.
-- **Resize forensics via the debug log (DECISIONS #74/#75)**: for the
-  user's real-terminal drag tests, the evidence is `DOHPING_DEBUG=<path>
-  dohping --window HOST` — the app logs its own width observations
-  (`winch`, `tick`, `resize` with the crossing decision, `redraw` with
-  `reclaim in place (R=… N=… tw=…)` and `reclaimed tw=… phys=… (was …)`).
-  No terminal displays the width during a drag, so this log is the only
-  record of the sweep; ask the user for it instead of widths or
-  screenshots. Tags and format: `internal/debugx` + README "Debug
-  logging". The PTY probe passes the env var through.
-- **Reflow vs non-reflow (DECISIONS #75)**: the window-mode reclaim
-  assumes the REFLOWING world (the user's Windows Terminal) — R =
-  reflowedSpan(lastRows, tw) is the reflowed height, the cursor follows
-  its content, walk back R−1 and overwrite. Non-reflowing terminals
-  (sandbox PTY, xterm) keep the old-span walk-back: the crossing reclaim
-  would misplace there, which is why the PTY probe's crossing scenario
-  (window-subfloor) must SETTLE BELOW the floor (50→40 → freeze → two
-  blocks), never above it. The termScreen emulator models BOTH: resize()
-  (non-reflowing, existing tests) and reflowResize() (logical-line
-  re-wrap, cursor follows content — the reclaim tests).
+- **Resize forensics via the debug log (DECISIONS #74/#75)**: for the user's
+  real-terminal drag tests, the evidence is `DOHPING_DEBUG=<path> dohping
+  --window HOST` — the app logs its own width observations (`winch`, `tick`,
+  `resize` with the crossing decision, `redraw` with `reclaim in place (R=… N=…
+  tw=…)` and `reclaimed tw=… phys=… (was …)`). No terminal displays the width
+  during a drag, so this log is the only record of the sweep; ask the user for
+  it instead of widths or screenshots. Tags and format: `internal/debugx` +
+  README "Debug logging".
 - Regression tests must accompany every acceptance fix (that's the established
-  pattern, #50–66 all have them).
+  pattern, #50–78 all have them).
 
 ## 8. Project conventions (user's way of working)
 
@@ -348,12 +250,14 @@ internal/cli/                flag parse, validation, conflicts, help
 internal/app/                Main, run loop, signals, key reader, summary
 internal/ping/               Probe iface, ICMP (3-tier incl. pingcmd.go), TCP
 internal/state/              engine, hysteresis, RTT stats, events
-internal/output/             Layout/format, plain Display, Window (in-place)
+internal/output/             Layout/format, plain Display, Window (in-place + reclaim)
 internal/theme/              role-based ANSI color rules
 internal/logx/               text/JSON log files
 internal/debugx/             optional DOHPING_DEBUG diagnostic logger (#74)
 internal/signalx/            SIGINT/SIGTERM listen, SIGWINCH (unix/windows split)
 scripts/release.sh           cross-compile + SHA256SUMS
+scripts/pty-resize-probe.py  real-PTY resize scenarios (window/same-band/subfloor/plain)
+SPEC-window-resize-reclaim.md shipped resize design (approved + shipped)
 dist/                        release artifacts (5 binaries + sums)
 ```
 
@@ -365,7 +269,7 @@ go-ahead. Do NOT build this without the user saying go.**
 **Why it exists:** 3 of the user's last 5 projects were command-line based.
 The rig lessons (render the stream through an emulator and assert the visible
 screen, never escape-list assertions; ONLCR traps; real-PTY resize proof) cost
-five acceptance rounds on dohping — they should carry forward, not be re-paid
+many acceptance rounds on dohping — they should carry forward, not be re-paid
 per project. Hard constraint the user added: the asset must be CI-ready — the
 project will live on GitHub, so anyone must be able to run the suite with a
 stock toolchain + stock Python, no agent, no sandbox.
@@ -377,17 +281,17 @@ stock toolchain + stock Python, no agent, no sandbox.
    specific instance):
    - `--binary PATH` (fixes the hardcoded `/tmp/dohping-test`), `--scenario NAME`,
      optional `--cols/--rows/--duration/--resize-to`.
-   - `SCENARIOS` dict: `name -> fn(binary, opts) -> bool`. dohping's two
-     scenarios ship as examples: `window` (freeze-and-restart on resize) and
-     `plain` (live line anchored below minimum width).
+   - `SCENARIOS` dict: `name -> fn(binary, opts) -> bool`. dohping's scenarios
+     ship as examples: `window`, `window-same-band`, `window-subfloor` and
+     `plain`.
    - Core untouched: `TermScreen` emulator, `pty.fork` capture, TIOCSWINSZ
-     injection, DSR/CPR answering, `RESULT: PASS/FAIL` + exit 0/1.
+     injection, `RESULT: PASS/FAIL` + exit 0/1.
    - stdlib-only (`pty`/`fcntl`/`termios`/`select`), POSIX — runs on
      Linux/macOS CI runners; deterministic (fixed durations, no interactivity).
 2. `~/.hermes/user/tools/scripts/ci-terminal-probe.yml` — GitHub Actions
    workflow template (copy into `.github/workflows/`, adjust build step +
    scenario names): `rm -f` fresh build (stale-build trap), `go test -race ./...`,
-   `go vet`, gofmt check, probe `window` + `plain`, release matrix
+   `go vet`, gofmt check, probe scenarios, release matrix
    (linux/darwin/windows × amd64/arm64 + SHA256SUMS). gosec via the securego
    action or prebuilt tarball — NEVER `go install gosec@latest` (compiles the
    LLM-SDK deps, OOM'd the sandbox, DECISIONS #63).
@@ -407,15 +311,3 @@ either — same constraint as the sandbox). Windows CI runs unit tests only
 **Trigger:** user says go → build per this plan, commit in the tools/ repo
 (it is a git repo, branch `main`), repoint this HANDOFF §7 to the parked
 harness.
-
-- **Round 17 reclaim (8dcce21a) in WEAR-TEST (DECISIONS #77, 2026-08-18).**
-  Proper retest: user confirms "holds up really well but is not faultless,
-  which I think I will probably have to accept. I will wear it for a while."
-  The original round-18 rejection was based on a stale binary (the
-  unversioned-filename trap — now fixed: §6). The reclaim build is
-  published as `dohping-linux-amd64-8dcce21a` (experimental → wear-test);
-  B (0014967e) remains the shipped/committed build. On confirmation: revert
-  the B revert (2b2413b) and round-17 revert (96d4373) — one clean commit
-  that restores rounds 15+17 in a single revert-of-reverts, updates the
-  plain-name file, and updates INDEX. If the wear test reveals a real
-  blocker, B stays shipped and resize is closed.
