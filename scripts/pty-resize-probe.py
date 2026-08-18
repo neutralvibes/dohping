@@ -4,14 +4,16 @@
 Scenarios (argv[1]):
   window (default): spawns dohping --window in a 60x24 pty, resizes the pty
     to 100x24 mid-run (SIGWINCH + TIOCSWINSZ), renders the capture through
-    a VT emulator and prints the visible screen — proves the block FREEZES
-    on resize and restarts on a fresh row below the frozen rendering
-    (DECISIONS #67: no CPR, no reclaim of the re-wrapped block).
-  window-same-band: same setup but resizes 60 → 55 mid-run — a width change
-    that leaves every line's physical row count unchanged (DECISIONS #70:
-    the block occupies 12 rows at both widths). Proves the block repaints
-    IN PLACE: exactly one block on the final screen, no frozen duplicate,
-    no restart CRLF.
+    a VT emulator and prints the visible screen — proves the block repaints
+    IN PLACE across the resize: with column trimming (DECISIONS #71) the
+    line never wraps at these widths, so the reflow cannot move it and
+    exactly ONE block remains on screen (no frozen duplicate).
+  window-subfloor: same setup but 40x24 → 70x24 mid-run — a width change
+    BELOW the 47-cell essentials floor (the line wraps at 40, not at 70):
+    a genuine wrap-count change, so the block FREEZES and restarts on a
+    fresh row below the frozen rendering (DECISIONS #67/#70: two blocks).
+  window-same-band: 60 → 55 mid-run — both widths keep the trimmed line in
+    one row; repaints in place, one block (DECISIONS #70).
   plain: spawns PLAIN live mode in a fixed 60x24 pty (below the 81-cell
     minimum, so every line wraps) and asserts the live line stays anchored
     across many redraws — the pre-#65 code walked it DOWN one row per
@@ -210,24 +212,41 @@ def main():
         print("RESULT: " + ("PASS — live line anchored" if ok else "FAIL — drifted/fragmented"))
         return
 
-    # window mode: 60 → 100 mid-run. On resize the block FREEZES, then
-    # restarts on a fresh row below the frozen rendering (DECISIONS #67);
-    # the emulator is non-reflowing, so the final screen shows the frozen
-    # 60-wide block followed by the fresh 100-wide block.
+    if mode == "window-subfloor":
+        # 40 → 70 mid-run. At 40 the 47-cell essentials line wraps (2
+        # rows); at 70 it fits one row — a genuine wrap-count change, so
+        # the block FREEZES then restarts below the frozen rendering
+        # (DECISIONS #67 + #70 conditional freeze: two blocks on screen).
+        scr = TermScreen(rows, 40)
+        buf, code = capture(["--window"] + common, 40, rows, scr, resize_to=70)
+        print("=== visible screen at final width (70 cols) ===")
+        print(scr.dump())
+        print(f"=== exit status: {code} ===")
+        headers = [r for r in range(rows) if scr.line(r).startswith("TIME")]
+        fresh = [r for r in range(rows) if re.match(r"^\d{2}:\d{2}:\d{2}", scr.line(r))]
+        ok = len(headers) == 2 and headers[1] > headers[0] and any(r > headers[1] for r in fresh)
+        print(f"header rows: {headers} (want exactly 2: frozen + fresh below)")
+        print(f"timestamp rows: {fresh}")
+        print("RESULT: " + ("PASS — sub-floor crossing froze then restarted below" if ok else "FAIL — block not cleanly restarted"))
+        return
+
+    # window mode: 60 → 100 mid-run. The line is trimmed to fit at 60
+    # (DECISIONS #71) and never wraps at either width, so the reflow cannot
+    # move the block: it must repaint IN PLACE — exactly ONE block on the
+    # final screen (no frozen duplicate).
     scr = TermScreen(rows, 60)
     buf, code = capture(["--window"] + common, 60, rows, scr, resize_to=100)
     print("=== visible screen at final width (100 cols) ===")
     print(scr.dump())
     print(f"=== exit status: {code} ===")
-    # Structural sanity on the visible screen: exactly two block headers
-    # (frozen + fresh), the fresh one strictly below, and a live line in
-    # the fresh block.
+    # Structural sanity on the visible screen: exactly one block header
+    # and a live line below it.
     headers = [r for r in range(rows) if scr.line(r).startswith("TIME")]
     fresh = [r for r in range(rows) if re.match(r"^\d{2}:\d{2}:\d{2}", scr.line(r))]
-    ok = len(headers) == 2 and headers[1] > headers[0] and any(r > headers[1] for r in fresh)
-    print(f"header rows: {headers} (want exactly 2: frozen + fresh below)")
+    ok = len(headers) == 1 and len(fresh) == 1 and fresh[0] > headers[0]
+    print(f"header rows: {headers} (want exactly 1 — repainted in place)")
     print(f"timestamp rows: {fresh}")
-    print("RESULT: " + ("PASS — block froze then restarted below" if ok else "FAIL — block not cleanly restarted"))
+    print("RESULT: " + ("PASS — block repainted in place across the resize" if ok else "FAIL — block froze/duplicated"))
     # Structural sanity on the raw stream.
     text = buf.decode("utf-8", "replace")
     print(f"bytes captured: {len(buf)}")

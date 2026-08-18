@@ -39,7 +39,22 @@ type Layout struct {
 	displayHost string // host truncated to hostWidth with …
 	timeFormat  string
 	timeWidth   int
+	retained    int // rightmost columns kept (4 = MIN MAX AVG FAILS … 0 = essentials only)
 	theme       *theme.Renderer
+}
+
+// rightCols are the four rightmost columns in retention order. On a
+// terminal too narrow for the full line the window layout drops them from
+// the RIGHT (FAILS first) so the line keeps fitting instead of wrapping
+// (DECISIONS #71 — the user's "trim the output line so last columns start
+// disappearing"). Each is 8 cells including its leading separator, so a
+// retained count of r leaves fixed + 8r cells (fixed = 47 at HH:MM:SS and
+// the HOST-15 floor).
+var rightCols = []struct {
+	label string
+	width int
+}{
+	{"MIN", 7}, {"MAX", 7}, {"AVG", 7}, {"FAILS", 8},
 }
 
 // NewLayout builds a layout for the given display host and timestamp
@@ -53,6 +68,7 @@ func NewLayout(host, timeFormat string, th *theme.Renderer) *Layout {
 		host:       host,
 		timeFormat: timeFormat,
 		timeWidth:  tw,
+		retained:   4, // full line until a narrow terminal drops columns (DECISIONS #71)
 		theme:      th,
 	}
 	l.setHostWidth(hostWidthFor(host))
@@ -67,21 +83,31 @@ func NewLayout(host, timeFormat string, th *theme.Renderer) *Layout {
 // 79 cells — under 80).
 func (l *Layout) fixedWidth() int { return l.timeWidth + 56 }
 
-// Resize re-computes the HOST column for a terminal of the given width
-// (cells). HOST is the elastic column (DECISIONS #64, user-approved
-// 2026-08-17): content-fit with a terminal cap — as wide as the host's
-// own length (clamped to spec §9.4's [15, 40]) but never wider than the
-// terminal leaves after the fixed columns. Short hosts stay compact; long
-// hosts expand when room exists; a narrow terminal forces the column to
-// retract rather than wrap. The floor is minHostWidth — below it the line
-// simply cannot fit and wraps (documented limitation, DECISIONS #64).
+// Resize re-computes the layout for a terminal of the given width (cells).
+// HOST is the elastic column (DECISIONS #64, user-approved 2026-08-17):
+// content-fit with a terminal cap — as wide as the host's own length
+// (clamped to spec §9.4's [15, 40]) but never wider than the terminal
+// leaves after the fixed columns; a narrow terminal retracts the column
+// rather than wrapping. Once HOST hits its 15-cell floor, the four
+// rightmost columns drop from the RIGHT (DECISIONS #71) so the line still
+// fits: at 79 cells all four, then FAILS, AVG, MAX, MIN (~8 cells each) —
+// down to the essentials-only floor of 47 cells (HH:MM:SS). Only below
+// that floor does the line wrap (documented limitation, DECISIONS #64).
 // width ≤ 0 (unknown) leaves the layout unchanged.
 func (l *Layout) Resize(width int) {
 	if width <= 0 {
 		return
 	}
+	// Fixed part (TIME + 2sp + STATE + 1sp + DURATION + 1sp) plus the
+	// separator after HOST = timeWidth + 24.
+	fixed := l.timeWidth + 24
+	// Rightmost columns drop first at the HOST floor (each 8 cells):
+	retained := 4
+	for retained > 0 && fixed+minHostWidth+8*retained > width {
+		retained--
+	}
 	w := hostWidthFor(l.host)
-	if avail := width - l.fixedWidth(); avail < w {
+	if avail := width - fixed - 8*retained; avail < w {
 		w = avail
 	}
 	if w < minHostWidth {
@@ -90,6 +116,7 @@ func (l *Layout) Resize(width int) {
 	if w > maxHostWidth {
 		w = maxHostWidth
 	}
+	l.retained = retained
 	l.setHostWidth(w)
 }
 
@@ -128,9 +155,11 @@ type Line struct {
 // Header renders the column header, right-padded to the layout width and
 // colored (bold) when the theme is active.
 func (l *Layout) Header() string {
-	s := fmt.Sprintf("%-*s  %-*s %-5s %-14s %-7s %-7s %-7s %-8s",
-		l.timeWidth, "TIME", l.hostWidth, "HOST",
-		"STATE", "DURATION", "MIN", "MAX", "AVG", "FAILS")
+	s := fmt.Sprintf("%-*s  %-*s %-5s %-14s",
+		l.timeWidth, "TIME", l.hostWidth, "HOST", "STATE", "DURATION")
+	for i := 0; i < l.retained; i++ {
+		s += " " + fmt.Sprintf("%-*s", rightCols[i].width, rightCols[i].label)
+	}
 	s = strings.TrimRight(s, " ")
 	if l.theme != nil {
 		s = l.theme.Paint(s, theme.RoleHeader)
@@ -205,16 +234,16 @@ func (l *Layout) formatLine(ln Line, frame rune) string {
 		pad(l.displayHost, l.hostWidth, false),
 		pad(status, 5, false),
 		durField,
-		pad(min, 7, false),
-		pad(max, 7, false),
-		pad(avg, 7, false),
-		pad(fails, 8, false),
+	}
+	right := []string{min, max, avg, fails}
+	for i := 0; i < l.retained; i++ {
+		fields = append(fields, pad(right[i], rightCols[i].width, false))
 	}
 	if l.theme != nil {
 		fields[0] = l.theme.Paint(fields[0], theme.RoleTimestamp)
 		fields[2] = l.theme.PaintStatus(fields[2], ln.Status)
 		fields[3] = l.theme.Paint(fields[3], theme.RoleDuration)
-		if ln.Status == state.StatusDown && ln.Fails > 0 {
+		if l.retained == 4 && ln.Status == state.StatusDown && ln.Fails > 0 {
 			fields[7] = l.theme.Paint(fields[7], theme.RoleFails)
 		}
 	}
@@ -222,10 +251,10 @@ func (l *Layout) formatLine(ln Line, frame rune) string {
 	// DURATION and MIN are joined by a plain space; the liveness bar is
 	// carried inside the DURATION field's padding (see above), never in
 	// this separator.
-	s := strings.Join([]string{
-		fields[0], "  ", fields[1], " ", fields[2], " ", fields[3], " ",
-		fields[4], " ", fields[5], " ", fields[6], " ", fields[7],
-	}, "")
+	s := strings.Join([]string{fields[0], "  ", fields[1], " ", fields[2], " ", fields[3]}, "")
+	for i := 4; i < len(fields); i++ {
+		s += " " + fields[i]
+	}
 	return strings.TrimRight(s, " ")
 }
 

@@ -124,14 +124,19 @@ immediately; on Windows (no SIGWINCH) the 1-second tick re-measures, so
 resizes self-heal within a second. Every repaint re-reads the terminal
 size: the HOST column retracts/expands to fit (minimum 15 + the fixed
 columns = 79 cells), and if the terminal is narrower than that minimum the
-lines wrap but the block stays a coherent, non-interleaved stack. On
-reflowing terminals (Windows Terminal, Terminal.app, iTerm2) a resize
-re-wraps the block in a way the program cannot observe; dohping pauses
-redraws while the width is settling (300ms of stability), then restarts
-the block on a fresh row below the frozen rendering — the old block stays
-in scrollback as history, and the live data is always correct from the
-next repaint. The plain line mode's single live line gets the same
-treatment (see above).
+four rightmost columns (MIN, MAX, AVG, FAILS) drop one at a time from the
+right, so the line keeps fitting instead of wrapping — down to the
+essentials (TIME/HOST/STATE/DURATION, 46 cells). Only below that floor do
+lines wrap, and they stay a coherent, non-interleaved stack. On reflowing
+terminals (Windows Terminal, Terminal.app, iTerm2) a resize re-wraps the
+block in a way the program cannot observe; dohping pauses redraws while
+the width is settling (300ms of stability) — but only when the resize
+actually re-wraps the block: resizes within the same wrap band repaint in
+place with no frozen copy (the freeze is conditional). When a re-wrap does
+happen, the block restarts on a fresh row below the frozen rendering —
+the old block stays in scrollback as history, and the live data is always
+correct from the next repaint. Plain line mode's single live line has its
+own freeze treatment (see above).
 
 ## Logging
 

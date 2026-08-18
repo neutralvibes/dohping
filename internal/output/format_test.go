@@ -284,9 +284,13 @@ func TestLayoutResizeContentFit(t *testing.T) {
 	if l2.displayHost != "a-very-long-ho…" {
 		t.Errorf("displayHost after floor resize = %q, want 14 cells + ellipsis", l2.displayHost)
 	}
-	l2.Resize(78) // below the floor: NO further retraction
-	if l2.hostWidth != 15 {
-		t.Errorf("Resize(78) = %d, want 15 (no retraction below min)", l2.hostWidth)
+	l2.Resize(78) // below the 79-cell floor: HOST stays content-fit (22),
+	// the FAILS column drops instead of the line wrapping (DECISIONS #71)
+	if l2.hostWidth != 22 {
+		t.Errorf("Resize(78) = %d, want 22 (HOST absorbs, FAILS dropped)", l2.hostWidth)
+	}
+	if l2.retained != 3 {
+		t.Errorf("Resize(78) retained = %d, want 3 (FAILS dropped)", l2.retained)
 	}
 
 	l3 := NewLayout(strings.Repeat("x", 41), "HH:MM:SS", nil) // > 40 → cap
@@ -297,9 +301,64 @@ func TestLayoutResizeContentFit(t *testing.T) {
 	if l3.hostWidth != 36 {
 		t.Errorf("Resize(100) = %d, want 36", l3.hostWidth)
 	}
-	l3.Resize(70) // 4 left → floor
-	if l3.hostWidth != 15 {
-		t.Errorf("Resize(70) = %d, want 15", l3.hostWidth)
+	l3.Resize(70) // HOST absorbs (22), MAX+AVG+FAILS dropped (retained 2)
+	if l3.hostWidth != 22 {
+		t.Errorf("Resize(70) = %d, want 22", l3.hostWidth)
+	}
+	if l3.retained != 2 {
+		t.Errorf("Resize(70) retained = %d, want 2 (FAILS/AVG dropped)", l3.retained)
+	}
+}
+
+func TestLayoutTrimDropsRightmostColumns(t *testing.T) {
+	// DECISIONS #71: below the HOST floor the rightmost columns drop (each
+	// 8 cells) so the line fits instead of wrapping. Thresholds at
+	// HH:MM:SS + HOST-15: 79 all four, 71-78 no FAILS, 63-70 no FAILS/AVG,
+	// 55-62 only MIN, 47-54 essentials only, <47 wraps.
+	l := NewLayout("frigate.app.home", "HH:MM:SS", nil) // 16 cells
+	cases := []struct {
+		width, wantRetained int
+	}{
+		{79, 4}, {78, 3}, {71, 3}, {70, 2}, {63, 2}, {62, 1}, {55, 1}, {54, 0}, {47, 0},
+	}
+	for _, c := range cases {
+		l.Resize(c.width)
+		if l.retained != c.wantRetained {
+			t.Errorf("Resize(%d) retained = %d, want %d", c.width, l.retained, c.wantRetained)
+		}
+		ln := Line{Time: t0, Status: state.StatusUp, Duration: 4 * time.Second,
+			Stats: buildStats(time.Millisecond, 3*time.Millisecond, 2*time.Millisecond, 2)}
+		for _, s := range []string{l.Header(), l.FormatLine(ln)} {
+			if w := cellWidth(s); w > c.width {
+				t.Errorf("Resize(%d): rendered %d cells > width (%q)", c.width, w, s)
+			}
+		}
+	}
+	// Retained columns render right-to-left: at 62 the line ends with MIN,
+	// at 54 with DURATION; header matches.
+	l.Resize(62)
+	if got := l.Header(); !strings.HasSuffix(got, "MIN") {
+		t.Errorf("header at retained 1 must end with MIN: %q", got)
+	}
+	l.Resize(54)
+	if got := l.Header(); !strings.HasSuffix(got, "DURATION") {
+		t.Errorf("header at retained 0 must end with DURATION: %q", got)
+	}
+	// Below the 46-cell floor the line wraps (no more columns to drop):
+	// the LIVE line is 46 cells (its animation frame keeps the DURATION
+	// field untrimmed, so the header's 40 cells are not the widest line).
+	l.Resize(46)
+	if l.retained != 0 || cellWidth(l.Header()) != 40 {
+		t.Errorf("Resize(46): retained=%d header=%d cells, want 0 / 40 (fits)", l.retained, cellWidth(l.Header()))
+	}
+	l.Resize(45)
+	ln := Line{Time: t0, Status: state.StatusUp, Duration: 4 * time.Second,
+		Stats: buildStats(time.Millisecond, 3*time.Millisecond, 2*time.Millisecond, 2)}
+	if w := cellWidth(l.FormatLiveLine(ln, '▃')); w != 46 {
+		t.Errorf("live line at retained 0 = %d cells, want 46", w)
+	}
+	if physicalRows(cellWidth(l.FormatLiveLine(ln, '▃')), 45) != 2 {
+		t.Error("live line must wrap at 45 (the essentials floor)")
 	}
 }
 

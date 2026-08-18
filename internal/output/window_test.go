@@ -526,8 +526,8 @@ func statusCol(hostWidth int) int { return 8 + 2 + hostWidth + 1 }
 // must be clean.
 func TestWindowResizeGrowBackKeepsFrozenBlock(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 2, false, false, 60, 24)
-	*wPtr = 60
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 2, false, false, 40, 24)
+	*wPtr = 40
 	// Fill the block: one finalized history line + live (window-lines 2 →
 	// rows = header + 2 data, no padding).
 	w.Handle(changeEvent(t0, state.StatusUp))
@@ -553,7 +553,7 @@ func TestWindowResizeGrowBackKeepsFrozenBlock(t *testing.T) {
 	w.Tick()
 	frame2 := buf.String()
 
-	scr := newTermScreen(24, 60)
+	scr := newTermScreen(24, 40)
 	scr.feed(frame1)
 	scr.resize(120)
 	scr.feed(frame2)
@@ -683,32 +683,35 @@ func TestWindowResizeMinWidthTruncatesHost(t *testing.T) {
 }
 
 // TestWindowResizeBelowFloorWrapsCoherently is the regression test for the
-// reported bug: a terminal narrower than the 79-cell minimum wraps every
-// line, and the block must repaint as a coherent stack — one header, one
-// live line, no interleaved fragments — even across repeated redraws.
-// The old code counted LOGICAL rows for cursor movement, so a wrapped
-// block's cursor-up landed mid-block and rows overwrote each other.
+// reported bug: a terminal narrower than the essentials floor (47 cells —
+// columns dropped first per DECISIONS #71) wraps every line, and the block
+// must repaint as a coherent stack — one header, one live line, no
+// interleaved fragments — even across repeated redraws. The old code
+// counted LOGICAL rows for cursor movement, so a wrapped block's cursor-up
+// landed mid-block and rows overwrote each other.
 func TestWindowResizeBelowFloorWrapsCoherently(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
-	*wPtr = 60
+	w, wPtr, _, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
+	*wPtr = 40
 	w.Handle(changeEvent(t0, state.StatusUp))
 	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
 		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
 	w.Tick() // a third frame: cumulative drift must not appear
 
-	scr := newTermScreen(24, 60)
+	scr := newTermScreen(24, 40)
 	scr.feed(buf.String())
 
-	// Exactly one header, exactly one live line, nothing interleaved.
+	// Exactly one header (40 cells, fits in one row at 40), exactly one
+	// live line (46 cells with its animation frame — wraps to rows 1-2),
+	// nothing interleaved.
 	if !strings.HasPrefix(scr.line(0), "TIME") {
 		t.Errorf("row 0 must be the header: %q", scr.line(0))
 	}
 	if got := strings.Count(strings.Join(screenRows(scr), "\n"), "TIME"); got != 1 {
 		t.Errorf("header appears %d times (fragmentation): rows %q", got, screenRows(scr))
 	}
-	if !strings.HasPrefix(scr.line(2), "11:00:35") {
-		t.Errorf("live line must start at row 2 col 0 (wrapped after the header): row2=%q", scr.line(2))
+	if !strings.HasPrefix(scr.line(1), "11:00:35") {
+		t.Errorf("live line must start at row 1 col 0 (wrapped tail on row 2): row1=%q", scr.line(1))
 	}
 	// No repeated rows stacked on one screen line (the old bug signature:
 	// "down ... 1      15:54:45 ... down" fragments on a single row).
@@ -722,9 +725,9 @@ func TestWindowResizeBelowFloorWrapsCoherently(t *testing.T) {
 	// drift — the old bug got worse with every repaint).
 	buf.Reset()
 	w.Tick()
-	scr2 := newTermScreen(24, 60)
+	scr2 := newTermScreen(24, 40)
 	scr2.feed(buf.String())
-	if !strings.HasPrefix(scr2.line(0), "TIME") || !strings.HasPrefix(scr2.line(2), "11:00:35") {
+	if !strings.HasPrefix(scr2.line(0), "TIME") || !strings.HasPrefix(scr2.line(1), "11:00:35") {
 		t.Errorf("repeat redraw broke coherence: rows %q", screenRows(scr2))
 	}
 }
@@ -744,9 +747,9 @@ func screenRows(scr *termScreen) []string {
 // (DECISIONS #67 — the in-place reclaim is gone).
 func TestWindowResizeGrowBackKeepsFrozenRows(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
-	*wPtr = 60
-	w.Handle(changeEvent(t0, state.StatusUp)) // wrapped at 60
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
+	*wPtr = 40
+	w.Handle(changeEvent(t0, state.StatusUp)) // wrapped at 40 (below the 47-cell floor)
 	frame1 := buf.String()
 
 	*wPtr = 120
@@ -761,7 +764,7 @@ func TestWindowResizeGrowBackKeepsFrozenRows(t *testing.T) {
 	w.Tick()
 	frame2 := buf.String()
 
-	scr := newTermScreen(24, 60)
+	scr := newTermScreen(24, 40)
 	scr.feed(frame1)
 	scr.resize(120)
 	scr.feed(frame2)
@@ -793,8 +796,8 @@ func TestWindowResizeGrowBackKeepsFrozenRows(t *testing.T) {
 // restarts on a fresh row below the frozen block (DECISIONS #67).
 func TestWindowResizeFreezeThenRestart(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
-	*wPtr = 60
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
+	*wPtr = 40
 	w.Handle(changeEvent(t0, state.StatusUp))
 	frame1 := buf.String()
 
@@ -813,7 +816,7 @@ func TestWindowResizeFreezeThenRestart(t *testing.T) {
 		t.Errorf("restart must begin with CRLF to move below the frozen block: %q", restart)
 	}
 
-	scr := newTermScreen(24, 60)
+	scr := newTermScreen(24, 40)
 	scr.feed(frame1)
 	scr.resize(100)
 	scr.feed(restart)
@@ -842,8 +845,8 @@ func TestWindowResizeFreezeThenRestart(t *testing.T) {
 // for resizeSettleDelay (user-requested acceptance check, DECISIONS #67).
 func TestWindowResizeDragKeepsFreezing(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
-	*wPtr = 60
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
+	*wPtr = 40
 	w.Handle(changeEvent(t0, state.StatusUp))
 	buf.Reset()
 
@@ -853,11 +856,11 @@ func TestWindowResizeDragKeepsFreezing(t *testing.T) {
 		want  string // "" = frozen, "restart" = fresh-row restart emitted
 	}
 	steps := []step{
-		{100, 100 * time.Millisecond, ""},        // drag: 60 → 100
-		{80, 100 * time.Millisecond, ""},         // drag: 100 → 80 (clock restarts)
-		{100, 100 * time.Millisecond, ""},        // drag: 80 → 100 (clock restarts)
-		{100, 200 * time.Millisecond, ""},        // 200ms after the LAST change: still settling
-		{100, 100 * time.Millisecond, "restart"}, // 300ms of stability: restart fires
+		{60, 100 * time.Millisecond, ""},        // drag: 40 → 60 (crosses the 47 floor)
+		{35, 100 * time.Millisecond, ""},        // drag: 60 → 35 (clock restarts)
+		{60, 100 * time.Millisecond, ""},        // drag: 35 → 60 (clock restarts)
+		{60, 200 * time.Millisecond, ""},        // 200ms after the LAST change: still settling
+		{60, 100 * time.Millisecond, "restart"}, // 300ms of stability: restart fires
 	}
 	var restartOut string
 	for i, s := range steps {
@@ -884,12 +887,11 @@ func TestWindowResizeDragKeepsFreezing(t *testing.T) {
 }
 
 // TestWindowResizeSameBandRepaintsInPlace: a width change that leaves every
-// line's physical row count unchanged (60 → 55: the block occupies 12 rows
-// at both widths) cannot move the block in a reflow, so it must repaint IN
-// PLACE — no freeze, no fresh-row restart, no frozen block left in
-// scrollback (DECISIONS #70). Regression for the user's window-mode resize
-// artifacts: resizing within the same wrap band stacked a whole frozen
-// block per change.
+// line's physical row count unchanged (60 → 55: with column trimming the
+// line fits in one row at both widths — DECISIONS #71) cannot move the
+// block in a reflow, so it must repaint IN PLACE — no freeze, no fresh-row
+// restart, no frozen block left in scrollback (DECISIONS #70). Regression
+// for the user's window-mode resize artifacts.
 func TestWindowResizeSameBandRepaintsInPlace(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
@@ -925,25 +927,26 @@ func TestWindowResizeSameBandRepaintsInPlace(t *testing.T) {
 	if len(headers) != 1 {
 		t.Fatalf("same-band resize must keep exactly one block: header rows %v", headers)
 	}
-	if !strings.HasPrefix(scr.line(2), "11:00:35") {
-		t.Errorf("live line not at row 2 col 0 after same-band repaint: %q", scr.line(2))
+	if !strings.HasPrefix(scr.line(1), "11:00:35") {
+		t.Errorf("live line not at row 1 col 0 after same-band repaint: %q", scr.line(1))
 	}
 }
 
-// TestWindowResizeSameBandWrappedInPlace: the user's actual scenario —
-// terminal BELOW the column floor (both widths wrap every line), resized
-// within the same wrap band. Must repaint in place, wrapped and coherent,
-// with exactly one block (no frozen duplicate).
+// TestWindowResizeSameBandWrappedInPlace: terminal BELOW the essentials
+// floor (the live line wraps at both widths — 46 cells with its animation
+// frame vs 40/45 cols; the header fits at 40+), resized within the same
+// wrap band. Must repaint in place, wrapped and coherent, with exactly one
+// block (no frozen duplicate).
 func TestWindowResizeSameBandWrappedInPlace(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
-	*wPtr = 60
+	w, wPtr, _, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
+	*wPtr = 40
 	w.Handle(changeEvent(t0, state.StatusUp))
 	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
 		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
 	frame1 := buf.String()
 
-	*wPtr = 50
+	*wPtr = 45
 	buf.Reset()
 	w.Tick()
 	repaint := buf.String()
@@ -951,9 +954,9 @@ func TestWindowResizeSameBandWrappedInPlace(t *testing.T) {
 		t.Fatalf("below-floor same-band resize must repaint in place: %q", repaint)
 	}
 
-	scr := newTermScreen(24, 60)
+	scr := newTermScreen(24, 40)
 	scr.feed(frame1)
-	scr.resize(50)
+	scr.resize(45)
 	scr.feed(repaint)
 	rows := screenRows(scr)
 	var headers []int
@@ -965,8 +968,8 @@ func TestWindowResizeSameBandWrappedInPlace(t *testing.T) {
 	if len(headers) != 1 {
 		t.Fatalf("wrapped same-band resize must keep exactly one block: header rows %v", headers)
 	}
-	if !strings.HasPrefix(scr.line(2), "11:00:35") {
-		t.Errorf("live line not at row 2 col 0 (wrapped header above): %q", scr.line(2))
+	if !strings.HasPrefix(scr.line(1), "11:00:35") {
+		t.Errorf("live line not at row 1 col 0 (wrapped tail on row 2): %q", scr.line(1))
 	}
 }
 
@@ -995,19 +998,20 @@ func TestWindowResizeSameBandDragNoFreeze(t *testing.T) {
 }
 
 // TestWindowResizeCrossesBandFreezes: the conditional freeze must still
-// fire when the wrap band changes WITHIN the normal width range (60 → 73:
-// 12 rows → 7 rows) — a reflow moves the block then, and reclaiming it
-// would corrupt the screen (the #67 contract, now band-scoped).
+// fire when the wrap band changes (45 → 60: the 46-cell live line wraps at
+// 45, fits at 60) — a reflow moves the block then, and reclaiming it would
+// corrupt the screen (the #67 contract, now band-scoped; above the floor
+// columns drop instead, so crossings only exist below it — DECISIONS #71).
 func TestWindowResizeCrossesBandFreezes(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
-	*wPtr = 60
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 45, 24)
+	*wPtr = 45
 	w.Handle(changeEvent(t0, state.StatusUp))
 	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
 		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
 	frame1 := buf.String()
 
-	*wPtr = 73
+	*wPtr = 60
 	*now = now.Add(100 * time.Millisecond)
 	buf.Reset()
 	w.Tick()
@@ -1022,9 +1026,9 @@ func TestWindowResizeCrossesBandFreezes(t *testing.T) {
 		t.Fatalf("band-crossing restart must begin with CRLF: %q", restart)
 	}
 
-	scr := newTermScreen(24, 60)
+	scr := newTermScreen(24, 45)
 	scr.feed(frame1)
-	scr.resize(73)
+	scr.resize(60)
 	scr.feed(restart)
 	rows := screenRows(scr)
 	var headers []int
@@ -1035,5 +1039,49 @@ func TestWindowResizeCrossesBandFreezes(t *testing.T) {
 	}
 	if len(headers) != 2 || headers[1] <= headers[0] {
 		t.Fatalf("band-crossing resize must leave frozen block + fresh block below: header rows %v", headers)
+	}
+}
+
+// TestWindowTrimAtNarrowWidth: below the 79-cell line width the window
+// drops rightmost columns instead of wrapping (DECISIONS #71) — at 60 cols
+// the line is 55 cells (TIME/HOST/STATE/DURATION/MIN: FAILS, AVG and MAX
+// dropped), the block is a single row per line, and the screen is one
+// clean unwrapped block with the live line directly under the header.
+func TestWindowTrimAtNarrowWidth(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	w.Tick()
+
+	scr := newTermScreen(24, 60)
+	scr.feed(buf.String())
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
+		}
+	}
+	if len(headers) != 1 {
+		t.Fatalf("want exactly one block: header rows %v", headers)
+	}
+	// No wrapping: header at row 0, live line at row 1.
+	if !strings.HasPrefix(scr.line(0), "TIME") || !strings.HasPrefix(scr.line(1), "11:00:35") {
+		t.Fatalf("trimmed block must be unwrapped: row0=%q row1=%q", scr.line(0), scr.line(1))
+	}
+	// Rightmost columns gone: header ends at MIN (retained 1).
+	hdr := scr.line(0)
+	if !strings.HasSuffix(hdr, "MIN") || strings.Contains(hdr, "FAILS") ||
+		strings.Contains(hdr, "MAX") || strings.Contains(hdr, "AVG") {
+		t.Errorf("header at 60 cols must show only TIME/HOST/STATE/DURATION/MIN: %q", hdr)
+	}
+	// Block = header + 5 data rows, nothing below.
+	for r := 6; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not blank below the trimmed block: %q", r, got)
+		}
 	}
 }
