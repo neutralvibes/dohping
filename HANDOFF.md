@@ -1,19 +1,23 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (66 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (67 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
 
-**Status: build complete. All 6 phases green. Acceptance rounds 1–8 shipped
-(DECISIONS #50–66, 2026-08-17), including the run-duration docs decision
-(#62), the gosec security round (#63), the window-mode terminal-resize
-round (#64), the plain-mode live-line resize round (#65), and the
-reflowing-terminal CPR re-anchor round (#66). User-verified so far: window
-mode in place, flags on either side of HOST, bare-seconds interval/timeout,
-clean exit summary, the liveness animation, and the window-mode resize fix.
-The #65/#66 resize work is shipped and awaiting the user's own terminal
-test (their report: "It can creep up and does not clear the rest on wrap" —
-the #66 fix targets exactly that); expect more acceptance reports.**
+**Status: build complete. All 6 phases green. Acceptance rounds 1–9 shipped
+(DECISIONS #50–67, 2026-08-17/18). Round 8's CPR re-anchor (#66) FAILED the
+user's real-terminal test ("still not working") and was replaced in round 9
+(#67) by freeze-and-restart: on a width change the displays pause in-place
+updates until the width is stable (300ms, restarted by every further change),
+then continue on a fresh row below the frozen re-wrapped rendering — the old
+rendering stays in scrollback as history. Root cause of the #66 failure:
+the user's terminal is Windows Terminal → WSL2 → Debian, and the DSR/CPR
+answer comes from ConPTY, whose reflow differs from the rendered view
+(microsoft/terminal#18725 — "wildly incorrect cursor positions"). #67 is
+position-independent and fully sandbox-tested; the user's own terminal test
+is the remaining gate. User-verified so far: window mode in place, flags on
+either side of HOST, bare-seconds interval/timeout, clean exit summary, the
+liveness animation, and the window-mode resize fix.**
 
 ---
 
@@ -138,7 +142,7 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `abe9027d6b59…` (2026-08-17, CPR re-anchor round #66; served = dist, verified byte-identical over TLS).
+- Current published linux-amd64 sha: `fc2b8b1ee320…` (2026-08-18, freeze/restart round #67; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works

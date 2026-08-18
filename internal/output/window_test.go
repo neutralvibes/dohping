@@ -17,19 +17,21 @@ func newTestWindow(buf *bytes.Buffer, lines int, quiet, noHeader bool, height in
 
 // newTestWindowSized injects a fixed terminal size. width 0 = unknown.
 func newTestWindowSized(buf *bytes.Buffer, lines int, quiet, noHeader bool, width, height int) *Window {
-	w := NewWindow(buf, plainLayout("192.168.1.23"), lines, quiet, noHeader, func() (int, int) { return width, height }, nil)
+	w := NewWindow(buf, plainLayout("192.168.1.23"), lines, quiet, noHeader, func() (int, int) { return width, height })
 	w.SetNow(func() time.Time { return t0.Add(time.Minute) })
 	return w
 }
 
-// newTestWindowResizable injects a MUTABLE terminal size: tests simulate a
-// resize by changing the captured variables between redraws. The closure
-// captures the parameter variables themselves, so mutating the returned
-// pointers changes what the next Redraw sees.
-func newTestWindowResizable(buf *bytes.Buffer, host string, lines int, quiet, noHeader bool, width, height int) (*Window, *int, *int) {
-	w := NewWindow(buf, plainLayout(host), lines, quiet, noHeader, func() (int, int) { return width, height }, nil)
-	w.SetNow(func() time.Time { return t0.Add(time.Minute) })
-	return w, &width, &height
+// newTestWindowResizable injects a MUTABLE terminal size AND clock: tests
+// simulate a resize by changing the captured variables between redraws,
+// and advance the clock to settle the resize freeze (DECISIONS #67). The
+// closures capture the parameter variables themselves, so mutating the
+// returned pointers changes what the next Redraw sees.
+func newTestWindowResizable(buf *bytes.Buffer, host string, lines int, quiet, noHeader bool, width, height int) (*Window, *int, *int, *time.Time) {
+	now := t0.Add(time.Minute)
+	w := NewWindow(buf, plainLayout(host), lines, quiet, noHeader, func() (int, int) { return width, height })
+	w.SetNow(func() time.Time { return now })
+	return w, &width, &height, &now
 }
 
 // cursorUpRe matches in-place redraw markers: \x1b[<n>A (cursor up).
@@ -517,14 +519,14 @@ func TestWindowTickRefreshesDuration(t *testing.T) {
 // rendered row: TIME(8) + 2sp + HOST(hostWidth) + 1sp.
 func statusCol(hostWidth int) int { return 8 + 2 + hostWidth + 1 }
 
-// TestWindowResizeGrowBackClearsStaleRowsFullBlock: the stale-row clear
-// must wipe the ENTIRE row, not just from the cursor's column — with a
-// FULL block (history + live, no blank padding) the cursor sits at the end
-// of the live line, and a clear without a column reset would leave the
-// stale wrap tail's text behind (DECISIONS #65).
-func TestWindowResizeGrowBackClearsStaleRowsFullBlock(t *testing.T) {
+// TestWindowResizeGrowBackKeepsFrozenBlock: with a FULL block (history +
+// live, no blank padding) a grow-back resize must NOT reclaim the old
+// rendering — the block freezes and, once the width settles, restarts on a
+// fresh row below it (DECISIONS #67). Everything below the fresh block
+// must be clean.
+func TestWindowResizeGrowBackKeepsFrozenBlock(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _ := newTestWindowResizable(&buf, "frigate.app.home", 2, false, false, 60, 24)
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 2, false, false, 60, 24)
 	*wPtr = 60
 	// Fill the block: one finalized history line + live (window-lines 2 →
 	// rows = header + 2 data, no padding).
@@ -539,8 +541,15 @@ func TestWindowResizeGrowBackClearsStaleRowsFullBlock(t *testing.T) {
 	w.Handle(upEv) // history 1 + live 1 — full block
 	frame1 := buf.String()
 
-	buf.Reset()
 	*wPtr = 120
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("mid-settle redraw produced output: %q", buf.String())
+	}
+	*now = now.Add(time.Second)
+	buf.Reset()
 	w.Tick()
 	frame2 := buf.String()
 
@@ -548,26 +557,39 @@ func TestWindowResizeGrowBackClearsStaleRowsFullBlock(t *testing.T) {
 	scr.feed(frame1)
 	scr.resize(120)
 	scr.feed(frame2)
-	// The block's last row (the live line) is non-blank; the stale rows
-	// below it must be fully cleared.
-	for r := 3; r < 8; r++ {
-		if got := scr.line(r); got != "" {
-			t.Errorf("row %d not cleared after grow-back (full block): %q", r, got)
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
 		}
 	}
-	if !strings.HasPrefix(scr.line(0), "TIME") {
-		t.Errorf("row 0 must be the header: %q", scr.line(0))
+	// Exactly two blocks: the frozen one and the fresh one below it.
+	if len(headers) != 2 {
+		t.Fatalf("header rows = %v, want exactly 2 (frozen block + fresh block)", headers)
+	}
+	if headers[1] <= headers[0] {
+		t.Fatalf("fresh block must start below the frozen block: %v", headers)
+	}
+	// Fresh block = header + 2 data rows at the new width: nothing below.
+	for r := headers[1] + 3; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not blank below the fresh block: %q", r, got)
+		}
 	}
 }
 
 // TestWindowResizeRetractsHostColumn: on a narrow terminal the HOST column
 // retracts to fit (content-fit with terminal cap — user-approved
 // 2026-08-17), the STATUS column follows, and growing back restores the
-// original columns. Rendered through the emulator at both widths.
+// original columns. A resize now freezes and restarts the block below
+// (DECISIONS #67); the NEW block uses the new width's columns. Rendered
+// through the emulator at both widths (each frame starts at the cursor
+// origin, so the restart CRLF places the block's header at row 1).
 func TestWindowResizeRetractsHostColumn(t *testing.T) {
 	var buf bytes.Buffer
 	// "frigate.app.home" is 16 cells → column 16 at startup.
-	w, wPtr, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 120, 24)
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 120, 24)
 	*wPtr = 120
 	w.Handle(changeEvent(t0, state.StatusUp))
 	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
@@ -580,30 +602,55 @@ func TestWindowResizeRetractsHostColumn(t *testing.T) {
 		t.Errorf("wide: status not at col %d: %q", statusCol(16), scr.line(1))
 	}
 
-	// Shrink to 81 (the minimum floor): HOST retracts to 15, STATUS moves
-	// to col 26, and the line still fits — no wrap at the minimum.
+	// Shrink to 81 (the minimum floor): settle, then the block restarts
+	// with HOST retracted to 15 and STATUS at col 26 — no wrap at the
+	// minimum.
 	*wPtr = 81
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	w.Tick() // frozen mid-settle
+	if buf.Len() != 0 {
+		t.Fatalf("mid-settle redraw produced output: %q", buf.String())
+	}
+	*now = now.Add(time.Second)
+	buf.Reset()
 	w.Tick()
 	scr = newTermScreen(24, 81)
 	scr.feed(buf.String())
-	if runes := []rune(scr.line(1)); runes[statusCol(15)] != 'u' {
-		t.Errorf("narrow: status not at col %d: %q", statusCol(15), scr.line(1))
+	// The restart CRLF places the fresh block's header at row 1.
+	if !strings.HasPrefix(scr.line(1), "TIME") {
+		t.Errorf("narrow: restarted block header not at row 1: row1=%q", scr.line(1))
 	}
-	for r := 6; r < scr.rows; r++ {
+	if runes := []rune(scr.line(2)); runes[statusCol(15)] != 'u' {
+		t.Errorf("narrow: status not at col %d: %q", statusCol(15), scr.line(2))
+	}
+	for r := 7; r < scr.rows; r++ {
 		if got := scr.line(r); got != "" {
 			t.Errorf("narrow: row %d not blank (block should be 6 rows at min width): %q", r, got)
 		}
 	}
 
-	// Grow back to 120: columns restore, screen stays clean.
+	// Grow back to 120: settle, then columns restore in the next
+	// restarted block.
 	*wPtr = 120
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("mid-settle redraw produced output: %q", buf.String())
+	}
+	*now = now.Add(time.Second)
+	buf.Reset()
 	w.Tick()
 	scr = newTermScreen(24, 120)
 	scr.feed(buf.String())
-	if runes := []rune(scr.line(1)); runes[statusCol(16)] != 'u' {
-		t.Errorf("grow-back: status not at col %d: %q", statusCol(16), scr.line(1))
+	if !strings.HasPrefix(scr.line(1), "TIME") {
+		t.Errorf("grow-back: restarted block header not at row 1: row1=%q", scr.line(1))
 	}
-	for r := 6; r < scr.rows; r++ {
+	if runes := []rune(scr.line(2)); runes[statusCol(16)] != 'u' {
+		t.Errorf("grow-back: status not at col %d: %q", statusCol(16), scr.line(2))
+	}
+	for r := 7; r < scr.rows; r++ {
 		if got := scr.line(r); got != "" {
 			t.Errorf("grow-back: row %d not blank: %q", r, got)
 		}
@@ -646,7 +693,7 @@ func TestWindowResizeMinWidthTruncatesHost(t *testing.T) {
 // block's cursor-up landed mid-block and rows overwrote each other.
 func TestWindowResizeBelowFloorWrapsCoherently(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	w, wPtr, _, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
 	*wPtr = 60
 	w.Handle(changeEvent(t0, state.StatusUp))
 	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
@@ -694,27 +741,147 @@ func screenRows(scr *termScreen) []string {
 	return rows
 }
 
-// TestWindowResizeGrowBackClearsStaleRows: growing the terminal back after
-// a narrow (wrapped) frame must clear the wrapped tails left below the
-// block — the user's "going back to original width restores it" becomes
-// automatic. The shrink-clear runs on PHYSICAL row counts.
-func TestWindowResizeGrowBackClearsStaleRows(t *testing.T) {
+// TestWindowResizeGrowBackKeepsFrozenRows: growing the terminal back after
+// a narrow (wrapped) frame — the block freezes at the old width and
+// restarts below once settled; nothing below the fresh block may remain
+// (DECISIONS #67 — the in-place reclaim is gone).
+func TestWindowResizeGrowBackKeepsFrozenRows(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
 	*wPtr = 60
-	w.Handle(changeEvent(t0, state.StatusUp)) // wrapped: 8 physical rows
+	w.Handle(changeEvent(t0, state.StatusUp)) // wrapped at 60
+	frame1 := buf.String()
 
 	*wPtr = 120
-	w.Tick() // unwrapped: 6 physical rows → 2 stale rows must be cleared
-
-	scr := newTermScreen(24, 120)
-	scr.feed(buf.String())
-	if runes := []rune(scr.line(1)); runes[statusCol(16)] != 'u' {
-		t.Errorf("grow-back: status not at col %d: %q", statusCol(16), scr.line(1))
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	w.Tick() // frozen mid-settle
+	if buf.Len() != 0 {
+		t.Fatalf("mid-settle redraw produced output: %q", buf.String())
 	}
-	for r := 6; r < scr.rows; r++ {
-		if got := scr.line(r); got != "" {
-			t.Errorf("row %d not cleared after grow-back (stale wrap tail): %q", r, got)
+	*now = now.Add(time.Second)
+	buf.Reset()
+	w.Tick()
+	frame2 := buf.String()
+
+	scr := newTermScreen(24, 60)
+	scr.feed(frame1)
+	scr.resize(120)
+	scr.feed(frame2)
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
 		}
+	}
+	// Exactly two blocks: the frozen one and the fresh one below it.
+	if len(headers) != 2 || headers[1] <= headers[0] {
+		t.Fatalf("want frozen block + fresh block below: header rows %v", headers)
+	}
+	// The fresh block uses the restored column layout (HOST 16).
+	if runes := []rune(scr.line(headers[1] + 1)); runes[statusCol(16)] != 'u' {
+		t.Errorf("grow-back: status not at col %d: %q", statusCol(16), scr.line(headers[1]+1))
+	}
+	// Fresh block = header + 5 data rows at the new width.
+	for r := headers[1] + 6; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not blank below the fresh block: %q", r, got)
+		}
+	}
+}
+
+// TestWindowResizeFreezeThenRestart: on a width change the block freezes
+// (no redraws) until the width is stable for resizeSettleDelay, then
+// restarts on a fresh row below the frozen block (DECISIONS #67).
+func TestWindowResizeFreezeThenRestart(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp))
+	frame1 := buf.String()
+
+	*wPtr = 100
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("mid-settle redraw produced output: %q", buf.String())
+	}
+	*now = now.Add(time.Second)
+	buf.Reset()
+	w.Tick()
+	restart := buf.String()
+	if !strings.HasPrefix(restart, "\r\n") {
+		t.Errorf("restart must begin with CRLF to move below the frozen block: %q", restart)
+	}
+
+	scr := newTermScreen(24, 60)
+	scr.feed(frame1)
+	scr.resize(100)
+	scr.feed(restart)
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
+		}
+	}
+	// Exactly two blocks: the frozen one and the fresh one below it.
+	if len(headers) != 2 || headers[1] <= headers[0] {
+		t.Fatalf("want frozen block + fresh block below: header rows %v", headers)
+	}
+	// Fresh block = header + 5 data rows at the new width.
+	for r := headers[1] + 6; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not blank below the fresh block: %q", r, got)
+		}
+	}
+}
+
+// TestWindowResizeDragKeepsFreezing: a resize drag restarts the settle
+// clock on every width change — the block stays frozen while the width
+// keeps moving and restarts exactly once after the width has been stable
+// for resizeSettleDelay (user-requested acceptance check, DECISIONS #67).
+func TestWindowResizeDragKeepsFreezing(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp))
+	buf.Reset()
+
+	type step struct {
+		width int
+		adv   time.Duration
+		want  string // "" = frozen, "restart" = fresh-row restart emitted
+	}
+	steps := []step{
+		{100, 100 * time.Millisecond, ""},        // drag: 60 → 100
+		{80, 100 * time.Millisecond, ""},         // drag: 100 → 80 (clock restarts)
+		{100, 100 * time.Millisecond, ""},        // drag: 80 → 100 (clock restarts)
+		{100, 200 * time.Millisecond, ""},        // 200ms after the LAST change: still settling
+		{100, 100 * time.Millisecond, "restart"}, // 300ms of stability: restart fires
+	}
+	var restartOut string
+	for i, s := range steps {
+		*wPtr = s.width
+		*now = now.Add(s.adv)
+		buf.Reset()
+		w.Tick()
+		got := buf.String()
+		switch s.want {
+		case "":
+			if got != "" {
+				t.Fatalf("step %d (width %d): expected frozen, wrote: %q", i, s.width, got)
+			}
+		case "restart":
+			if !strings.HasPrefix(got, "\r\n") {
+				t.Errorf("step %d: restart must begin with CRLF: %q", i, got)
+			}
+			restartOut = got
+		}
+	}
+	if restartOut == "" {
+		t.Fatal("no restart emitted after the width settled")
 	}
 }

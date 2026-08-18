@@ -34,17 +34,19 @@ import (
 // The primitive engages only when live; piped/--no-live output is
 // byte-identical plain lines.
 //
-// REFLOWING terminals (Windows Terminal, Terminal.app, iTerm2) re-wrap
-// existing lines on resize, which moves the live line under the relative
-// bookkeeping — the walk-back overshoots (creep up) and the re-wrapped
-// first half is never overwritten ("does not clear the rest on wrap").
-// Fix (DECISIONS #66): when the terminal WIDTH changes, the display
-// queries the terminal's cursor position (DSR/CPR, \x1b[6n →
-// \x1b[<row>;<col>R, provided by the app) — the cursor sits at the end
-// of the (re-wrapped) live line — and recomputes the anchor from where
-// the terminal actually put it. On non-reflowing terminals the cursor
-// agrees with our bookkeeping and nothing changes; on terminals that do
-// not answer the query the display degrades to the relative behavior.
+// RESIZE handling (DECISIONS #67): a reflowing terminal (Windows
+// Terminal, Terminal.app, iTerm2) re-wraps existing lines on width
+// change, moving the live line under the relative bookkeeping — the
+// walk-back overshoots (creep) and the re-wrapped first half is never
+// overwritten. Querying the terminal for its cursor position (DSR/CPR,
+// DECISIONS #66) was abandoned: on Windows Terminal/WSL the answer comes
+// from ConPTY, whose reflow differs from the rendered view (microsoft/
+// terminal#18725), so the anchor was garbage. Instead the display never
+// reclaims a reflowed line: when the width changes it FREEZES in-place
+// writes while the terminal settles, then moves to a fresh row below the
+// frozen (re-wrapped) line and continues there — the old rendering stays
+// in scrollback as history. Position-independent: works identically on
+// reflowing and non-reflowing terminals, no terminal cooperation needed.
 type Display struct {
 	w        io.Writer
 	layout   *Layout
@@ -52,25 +54,21 @@ type Display struct {
 	noHeader bool
 	live     bool
 	sizeFn   func() (width, height int) // terminal size; width drives wrap math (0 = unknown)
-	reanchor func() (row int, ok bool)  // terminal cursor row via DSR/CPR (1-based); nil = never
 	now      func() time.Time
 
-	started      bool
-	cur          *Line
-	frame        int  // liveness animation frame (advances per probe event)
-	lastPhysRows int  // physical rows the previous live line occupied (wrap bookkeeping)
-	lastWidth    int  // terminal width at the last write (0 = unknown)
-	anchor       int  // cursor row (CPR base) where the live line starts
-	haveAnchor   bool // anchor calibrated (first write / first reflow)
+	started       bool
+	cur           *Line
+	frame         int       // liveness animation frame (advances per probe event)
+	lastPhysRows  int       // physical rows the previous live line occupied (wrap bookkeeping)
+	lastWidth     int       // terminal width at the last write (0 = unknown)
+	resizeSince   time.Time // when the current width change was first observed
+	resizePending bool      // width changed; in-place writes frozen until the terminal settles
 }
 
 // NewDisplay builds a display. live controls in-place updating (decided
 // by the caller from --live/--no-live and TTY state). sizeFn returns the
 // terminal size (0 = unknown → never wrap); nil means never wrap.
-// reanchor queries the terminal's cursor row (DSR/CPR) after a width
-// change — the app supplies it (it owns stdin); nil disables re-anchoring
-// (terminals that never answer degrade to relative bookkeeping).
-func NewDisplay(w io.Writer, layout *Layout, quiet, noHeader, live bool, sizeFn func() (width, height int), reanchor func() (row int, ok bool)) *Display {
+func NewDisplay(w io.Writer, layout *Layout, quiet, noHeader, live bool, sizeFn func() (width, height int)) *Display {
 	return &Display{
 		w:        w,
 		layout:   layout,
@@ -78,7 +76,6 @@ func NewDisplay(w io.Writer, layout *Layout, quiet, noHeader, live bool, sizeFn 
 		noHeader: noHeader,
 		live:     live,
 		sizeFn:   sizeFn,
-		reanchor: reanchor,
 		now:      time.Now,
 	}
 }
@@ -178,14 +175,17 @@ func (d *Display) Finalize() {
 // removes rows the previous live line used but this finalized line does
 // not (DECISIONS #65). The next live line starts fresh below, so the wrap
 // bookkeeping resets. In non-live mode it is plain newline-terminated
-// output.
+// output. A resize in flight forces the freeze/restart (DECISIONS #67):
+// the finalized line must land below the frozen rendering, never reclaim
+// it — the old line stays frozen on screen as history.
 func (d *Display) printFinalized(s string) {
 	if !d.live {
 		fmt.Fprintln(d.w, s)
 		return
 	}
 	tw := d.termWidth()
-	d.maybeReanchor(tw, s)
+	d.resizeNote(tw)
+	d.resizeRestart() // force: finalize must land correctly even mid-episode
 	var sb strings.Builder
 	if d.lastPhysRows > 1 {
 		fmt.Fprintf(&sb, "\x1b[%dA\r", d.lastPhysRows-1)
@@ -216,11 +216,26 @@ func (d *Display) printFinalized(s string) {
 // if this line uses fewer rows than the previous one (terminal grew back),
 // clear the rows no longer used. Terminal width is re-read on EVERY write,
 // so a resize is picked up by probe events, the 1-second tick, and the
-// SIGWINCH fast path alike. A width change also triggers a cursor-query
-// re-anchor for reflowing terminals (DECISIONS #66).
+// SIGWINCH fast path alike.
+//
+// RESIZE (DECISIONS #67): when the width changes, in-place writes are
+// FROZEN until the terminal has settled (resizeSettleDelay with no further
+// width change) — during a reflow the old line's position is unknowable,
+// so any write is a gamble. Once settled, the display moves to a fresh
+// row below the frozen rendering and resumes there; the frozen line
+// remains in scrollback as history. This replaces the CPR re-anchor
+// (#66), which failed on Windows Terminal/WSL (ConPTY reports unreliable
+// positions — microsoft/terminal#18725).
 func (d *Display) writeLive(s string) {
 	tw := d.termWidth()
-	d.maybeReanchor(tw, s)
+	d.resizeNote(tw)
+	if d.resizePending {
+		if d.now().Sub(d.resizeSince) >= resizeSettleDelay {
+			d.resizeRestart() // settled: fresh row below the frozen line
+		} else {
+			return // mid-reflow: defer the in-place write
+		}
+	}
 	var sb strings.Builder
 	if d.lastPhysRows > 1 {
 		fmt.Fprintf(&sb, "\x1b[%dA\r", d.lastPhysRows-1)
@@ -244,40 +259,41 @@ func (d *Display) writeLive(s string) {
 	fmt.Fprint(d.w, sb.String())
 }
 
-// maybeReanchor handles a terminal resize on a REFLOWING terminal
-// (DECISIONS #66): when the width changed since the last write, the
-// terminal may have re-wrapped the live line, invalidating the relative
-// walk-back bookkeeping. Query the terminal's cursor position (DSR/CPR) —
-// the cursor sits at the end of the (re-wrapped) live line — and recompute
-// the anchor from where the terminal actually put it. Three outcomes:
-//   - cursor agrees with our bookkeeping → no reflow happened, nothing to do
-//   - cursor elsewhere → reflow: the line now spans physicalRows(cells, tw)
-//     rows ending at the cursor; re-anchor and reset the bookkeeping
-//   - no answer (piped stdin, dumb terminal) → keep relative bookkeeping
-//     (degrades to the #65 behavior)
-func (d *Display) maybeReanchor(tw int, s string) {
-	if tw == d.lastWidth || d.reanchor == nil {
+// resizeSettleDelay is how long the width must stay stable after a change
+// before the displays restart on a fresh row (DECISIONS #67). Covers a
+// resize drag, which fires many width changes in quick succession.
+const resizeSettleDelay = 300 * time.Millisecond
+
+// resizeNote records a width change (DECISIONS #67): the first observation
+// just calibrates lastWidth; a real change marks the display frozen
+// (resizePending) until the width has been stable for resizeSettleDelay.
+// No-op when the width is unknown (≤ 0).
+func (d *Display) resizeNote(tw int) {
+	if tw <= 0 {
 		return
 	}
-	d.lastWidth = tw
-	row, ok := d.reanchor()
-	if !ok {
+	if d.lastWidth == 0 {
+		d.lastWidth = tw
 		return
 	}
-	if d.haveAnchor && row == d.anchor+d.lastPhysRows-1 {
-		return // cursor where we left it: no reflow
+	if tw != d.lastWidth {
+		d.lastWidth = tw
+		d.resizeSince = d.now()
+		d.resizePending = true
 	}
-	if !d.haveAnchor {
-		// First write: the cursor is at the live line's start.
-		d.anchor = row
-		d.haveAnchor = true
+}
+
+// resizeRestart moves the display below the frozen (re-wrapped) rendering
+// and resets the wrap bookkeeping to the fresh row. No-op unless a resize
+// is pending. Called when the width has settled (writeLive) or when a
+// write must land correctly right now (finalize paths — DECISIONS #67).
+func (d *Display) resizeRestart() {
+	if !d.resizePending {
 		return
 	}
-	// Reflow detected: the line was re-wrapped at the new width and the
-	// cursor sits at its end.
-	p := physicalRows(cellWidth(s), tw)
-	d.anchor = row - (p - 1)
-	d.lastPhysRows = p
+	d.resizePending = false
+	fmt.Fprint(d.w, "\r\n")
+	d.lastPhysRows = 1
 }
 
 // termWidth returns the terminal width in cells (0 = unknown → no wrap).

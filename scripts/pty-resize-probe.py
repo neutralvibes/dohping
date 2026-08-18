@@ -4,8 +4,9 @@
 Scenarios (argv[1]):
   window (default): spawns dohping --window in a 60x24 pty, resizes the pty
     to 100x24 mid-run (SIGWINCH + TIOCSWINSZ), renders the capture through
-    a VT emulator and prints the visible screen — proves the block
-    re-anchors on resize and clears stale wrapped rows.
+    a VT emulator and prints the visible screen — proves the block FREEZES
+    on resize and restarts on a fresh row below the frozen rendering
+    (DECISIONS #67: no CPR, no reclaim of the re-wrapped block).
   plain: spawns PLAIN live mode in a fixed 60x24 pty (below the 81-cell
     minimum, so every line wraps) and asserts the live line stays anchored
     across many redraws — the pre-#65 code walked it DOWN one row per
@@ -106,11 +107,8 @@ class TermScreen:
 
 def capture(args, cols, rows, scr, resize_to=None, duration=7.0):
     """Run dohping in a pty of the given size; optionally resize mid-run.
-    scr is a TermScreen fed incrementally; it acts as the terminal for
-    DSR/CPR queries — when dohping asks for its cursor position
-    (\\x1b[6n), the probe answers from the emulator's live cursor, which
-    makes this a true end-to-end test of the re-anchor round-trip
-    (DECISIONS #66). Returns (raw_bytes, exit_code)."""
+    scr is a TermScreen fed incrementally and renders the final state.
+    Returns (raw_bytes, exit_code)."""
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["TERM"] = "xterm-256color"
@@ -131,12 +129,7 @@ def capture(args, cols, rows, scr, resize_to=None, duration=7.0):
             if not data:
                 break
             buf += data
-            text = data.decode("utf-8", "replace")
-            scr.feed(text)
-            if "\x1b[6n" in text:
-                # Answer the DSR query with the emulator's cursor position
-                # (CPR, 1-based).
-                os.write(fd, f"\x1b[{scr.r + 1};{scr.c + 1}R".encode())
+            scr.feed(data.decode("utf-8", "replace"))
         now = time.time() - t0
         if not resized and resize_to is not None and now > 3.0:
             # Mid-run resize. SIGWINCH goes to the pty's foreground
@@ -189,19 +182,31 @@ def main():
         print("RESULT: " + ("PASS — live line anchored" if ok else "FAIL — drifted/fragmented"))
         return
 
-    # window mode: 60 → 100 mid-run. The emulator tracks the pty live and
-    # answers CPR queries, so the final screen is the emulator's state.
+    # window mode: 60 → 100 mid-run. On resize the block FREEZES, then
+    # restarts on a fresh row below the frozen rendering (DECISIONS #67);
+    # the emulator is non-reflowing, so the final screen shows the frozen
+    # 60-wide block followed by the fresh 100-wide block.
     scr = TermScreen(rows, 60)
     buf, code = capture(["--window"] + common, 60, rows, scr, resize_to=100)
     print("=== visible screen at final width (100 cols) ===")
     print(scr.dump())
     print(f"=== exit status: {code} ===")
+    # Structural sanity on the visible screen: exactly two block headers
+    # (frozen + fresh), the fresh one strictly below, and a live line in
+    # the fresh block.
+    headers = [r for r in range(rows) if scr.line(r).startswith("TIME")]
+    fresh = [r for r in range(rows) if re.match(r"^\d{2}:\d{2}:\d{2}", scr.line(r))]
+    ok = len(headers) == 2 and headers[1] > headers[0] and any(r > headers[1] for r in fresh)
+    print(f"header rows: {headers} (want exactly 2: frozen + fresh below)")
+    print(f"timestamp rows: {fresh}")
+    print("RESULT: " + ("PASS — block froze then restarted below" if ok else "FAIL — block not cleanly restarted"))
     # Structural sanity on the raw stream.
     text = buf.decode("utf-8", "replace")
     print(f"bytes captured: {len(buf)}")
     upseqs = re.findall(r"\x1b\[(\d+)A", text)
     print(f"cursor-up sequences: {len(upseqs)} (last: {upseqs[-1] if upseqs else 'none'})")
     print(f"shrink-clear sequences (ESC[1B CR ESC[K): {text.count(chr(27)+'[1B'+chr(13)+chr(27)+'[K')}")
+    print(f"restart CRLF sequences: {text.count(chr(13)+chr(10))}")
 
 
 if __name__ == "__main__":

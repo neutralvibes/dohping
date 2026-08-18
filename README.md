@@ -83,9 +83,11 @@ Timing model: the first probe fires immediately, then probes start one
   it wraps, and it stays anchored in place across updates (resizes
   self-heal within a second, or immediately on Unix via SIGWINCH).
   Reflowing terminals (Windows Terminal, Terminal.app, iTerm2) re-wrap
-  lines on resize; dohping re-anchors by querying the terminal's cursor
-  position, so the line never creeps and stale wrap text is cleared.
-  Finalized and piped/`--no-live` output is unaffected — plain lines.
+  lines on resize; dohping never fights the reflow — it pauses in-place
+  updates until the width settles, then continues on a fresh row below
+  the frozen (re-wrapped) line, which stays in scrollback as history.
+  No cursor queries, works identically on every terminal. Finalized and
+  piped/`--no-live` output is unaffected — plain lines.
 - when stdout is piped, output is finalized lines only — no ANSI, no
   carriage returns
 
@@ -120,9 +122,12 @@ resizes self-heal within a second. Every repaint re-reads the terminal
 size: the HOST column retracts/expands to fit (minimum 15 + the fixed
 columns = 81 cells), and if the terminal is narrower than that minimum the
 lines wrap but the block stays a coherent, non-interleaved stack. On
-reflowing terminals (Windows Terminal, Terminal.app, iTerm2) the block
-re-anchors via a cursor-position query after a resize, so it never creeps
-up the page. The plain line mode's single live line gets the same
+reflowing terminals (Windows Terminal, Terminal.app, iTerm2) a resize
+re-wraps the block in a way the program cannot observe; dohping pauses
+redraws while the width is settling (300ms of stability), then restarts
+the block on a fresh row below the frozen rendering — the old block stays
+in scrollback as history, and the live data is always correct from the
+next repaint. The plain line mode's single live line gets the same
 treatment (see above).
 
 ## Logging

@@ -25,24 +25,22 @@ func newTestDisplay(w *bytes.Buffer, quiet, noHeader, live bool) *Display {
 }
 
 // newTestDisplaySized injects a terminal size; width drives the live
-// line's wrap bookkeeping (DECISIONS #65). reanchor is optional (nil =
-// never re-anchor; tests pass a fake to exercise reflowing terminals).
+// line's wrap bookkeeping (DECISIONS #65).
 func newTestDisplaySized(w *bytes.Buffer, quiet, noHeader, live bool, width, height int) *Display {
-	return newTestDisplaySizedReanchor(w, quiet, noHeader, live, width, height, nil)
-}
-
-func newTestDisplaySizedReanchor(w *bytes.Buffer, quiet, noHeader, live bool, width, height int, reanchor func() (int, bool)) *Display {
-	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height }, reanchor)
+	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height })
 	d.SetNow(func() time.Time { return t0.Add(time.Minute) })
 	return d
 }
 
-// newTestDisplayResizable injects a MUTABLE terminal size: tests simulate
-// a resize by changing the captured variables between redraws.
-func newTestDisplayResizable(w *bytes.Buffer, quiet, noHeader, live bool, width, height int) (*Display, *int, *int) {
-	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height }, nil)
-	d.SetNow(func() time.Time { return t0.Add(time.Minute) })
-	return d, &width, &height
+// newTestDisplayResizable injects a MUTABLE terminal size AND clock:
+// tests simulate a resize by changing the captured variables between
+// redraws, and advance the clock to settle the resize freeze (DECISIONS
+// #67).
+func newTestDisplayResizable(w *bytes.Buffer, quiet, noHeader, live bool, width, height int) (*Display, *int, *int, *time.Time) {
+	now := t0.Add(time.Minute)
+	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height })
+	d.SetNow(func() time.Time { return now })
+	return d, &width, &height, &now
 }
 
 func TestHeaderPrintedByDefault(t *testing.T) {
@@ -411,35 +409,197 @@ func TestDisplayLiveLineStaysAnchoredWhenWrapped(t *testing.T) {
 	}
 }
 
-// TestDisplayLiveLineGrowBackClearsTail: growing the terminal back after a
-// wrapped live line must clear the stale wrap tail (the pre-#65 code left
-// the tail row's text forever — it was never revisited). The frames are
-// rendered at their own widths: frame 1 on a 60-col screen, then the
-// screen GROWS to 120 without reflow (xterm-style — existing cells stay),
-// then frame 2 renders on the 120-col screen.
-func TestDisplayLiveLineGrowBackClearsTail(t *testing.T) {
+// TestDisplayLiveLineGrowBackKeepsFrozenLine: growing the terminal back
+// after a wrapped live line must NOT reclaim the old rendering (DECISIONS
+// #67): the wrapped line freezes in place as history, and after the width
+// settles the display restarts on a fresh row below it. Everything below
+// the fresh line must be clean.
+func TestDisplayLiveLineGrowBackKeepsFrozenLine(t *testing.T) {
 	var buf bytes.Buffer
-	d, wPtr, _ := newTestDisplayResizable(&buf, false, false, true, 60, 24)
+	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 60, 24)
 	*wPtr = 60
 	d.Handle(changeEvent(t0, state.StatusUp))
 	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
 		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0)) // 69 cells → wraps
 	frame1 := buf.String()
 
-	buf.Reset()
+	// Grow to 120 and observe the change while still settling: no write.
 	*wPtr = 120
-	d.Tick() // 1 row at the anchor; the old tail row must be cleared
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	d.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("mid-settle write produced output: %q", buf.String())
+	}
+	// Past the settle window: the display restarts on a fresh row.
+	*now = now.Add(time.Second)
+	buf.Reset()
+	d.Tick()
 	frame2 := buf.String()
+	if !strings.HasPrefix(frame2, "\r\n") {
+		t.Errorf("restart must begin with CRLF to move below the frozen line: %q", frame2)
+	}
 
 	scr := newTermScreen(24, 60)
 	scr.feed(frame1)
 	scr.resize(120)
 	scr.feed(frame2)
+	// The frozen wrapped line stays (rows 2-3) — it is history now.
 	if !strings.HasPrefix(scr.line(2), "11:00:35") {
-		t.Errorf("live line not at row 2 after grow-back: row2=%q", scr.line(2))
+		t.Errorf("frozen line not at row 2: row2=%q", scr.line(2))
 	}
-	if got := scr.line(3); got != "" {
-		t.Errorf("stale wrap tail not cleared on grow-back: row3=%q", got)
+	// The fresh live line restarts below, on its own row.
+	if !strings.HasPrefix(scr.line(4), "11:00:35") {
+		t.Errorf("live line not restarted at row 4: row4=%q", scr.line(4))
+	}
+	// Nothing below the fresh line.
+	for r := 5; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not blank below the fresh line: %q", r, got)
+		}
+	}
+}
+
+// TestDisplayResizeFreezeThenRestart: on a width change the live line is
+// FROZEN (no in-place writes) until the width has been stable for
+// resizeSettleDelay, then the display restarts on a fresh row below the
+// frozen rendering (DECISIONS #67). This is the acceptance contract for
+// reflowing terminals — no CPR, no reclaim of the re-wrapped line.
+func TestDisplayResizeFreezeThenRestart(t *testing.T) {
+	var buf bytes.Buffer
+	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 60, 24)
+	*wPtr = 60
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0)) // 69 cells → wraps rows 2-3
+	frame1 := buf.String()
+
+	*wPtr = 100
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	d.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("mid-settle write produced output: %q", buf.String())
+	}
+
+	*now = now.Add(time.Second) // settled: 1.1s since the change
+	buf.Reset()
+	d.Tick()
+	restart := buf.String()
+	if !strings.HasPrefix(restart, "\r\n") {
+		t.Errorf("restart must begin with CRLF to move below the frozen line: %q", restart)
+	}
+
+	scr := newTermScreen(24, 60)
+	scr.feed(frame1)
+	scr.resize(100)
+	scr.feed(restart)
+	// Frozen wrapped line at rows 2-3 (history), fresh line at row 4.
+	if !strings.HasPrefix(scr.line(2), "11:00:35") {
+		t.Errorf("frozen line not at row 2: row2=%q", scr.line(2))
+	}
+	if !strings.HasPrefix(scr.line(4), "11:00:35") {
+		t.Errorf("fresh live line not at row 4: row4=%q", scr.line(4))
+	}
+	for r := 5; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not blank below the fresh line: %q", r, got)
+		}
+	}
+}
+
+// TestDisplayResizeDragKeepsFreezing: a resize DRAG fires many width
+// changes in quick succession; each one must RESTART the settle clock, so
+// the display stays frozen while the width keeps moving and restarts
+// exactly once, only after the width has been stable for resizeSettleDelay
+// (user-requested acceptance check, DECISIONS #67).
+func TestDisplayResizeDragKeepsFreezing(t *testing.T) {
+	var buf bytes.Buffer
+	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 60, 24)
+	*wPtr = 60
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	buf.Reset()
+
+	type step struct {
+		width int
+		adv   time.Duration
+		want  string // "" = frozen, "restart" = fresh-row restart emitted
+	}
+	steps := []step{
+		{100, 100 * time.Millisecond, ""},        // drag: 60 → 100
+		{80, 100 * time.Millisecond, ""},         // drag: 100 → 80 (clock restarts)
+		{100, 100 * time.Millisecond, ""},        // drag: 80 → 100 (clock restarts)
+		{100, 200 * time.Millisecond, ""},        // 200ms after the LAST change: still settling
+		{100, 100 * time.Millisecond, "restart"}, // 300ms of stability: restart fires
+	}
+	var restartOut string
+	for i, s := range steps {
+		*wPtr = s.width
+		*now = now.Add(s.adv)
+		buf.Reset()
+		d.Tick()
+		got := buf.String()
+		switch s.want {
+		case "":
+			if got != "" {
+				t.Fatalf("step %d (width %d): expected frozen, wrote: %q", i, s.width, got)
+			}
+		case "restart":
+			if !strings.HasPrefix(got, "\r\n") {
+				t.Errorf("step %d: restart must begin with CRLF: %q", i, got)
+			}
+			restartOut = got
+		}
+	}
+	if restartOut == "" {
+		t.Fatal("no restart emitted after the width settled")
+	}
+}
+
+// TestDisplayFinalizeDuringResize: a status change while the width is
+// settling must still finalize correctly — the finalized line lands on a
+// fresh row below the frozen rendering, never reclaimed mid-reflow
+// (DECISIONS #67).
+func TestDisplayFinalizeDuringResize(t *testing.T) {
+	var buf bytes.Buffer
+	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 60, 24)
+	*wPtr = 60
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	frame1 := buf.String()
+
+	// Width changes; before the settle window passes, a status change
+	// forces the finalize path.
+	*wPtr = 100
+	*now = now.Add(100 * time.Millisecond)
+	downEv := state.Event{
+		Kind: state.EventStatusChange, Time: t0.Add(30 * time.Second),
+		Status: state.StatusDown, PrevStatus: state.StatusUp,
+		Duration: 30 * time.Second, Fails: 1,
+		PrevStats: buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1),
+	}
+	buf.Reset()
+	d.Handle(downEv) // finalize mid-settle
+
+	scr := newTermScreen(24, 60)
+	scr.feed(frame1)
+	scr.resize(100)
+	scr.feed(buf.String())
+	// Frozen up line at rows 2-3; finalized line at row 4; new live down
+	// line at row 5.
+	if !strings.HasPrefix(scr.line(4), "11:00:35") {
+		t.Errorf("finalized line not at row 4: row4=%q", scr.line(4))
+	}
+	if !strings.HasPrefix(scr.line(5), "11:01:05") {
+		t.Errorf("new live line not at row 5: row5=%q", scr.line(5))
+	}
+	for r := 6; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not blank: %q", r, got)
+		}
 	}
 }
 
@@ -479,144 +639,6 @@ func TestDisplayFinalizeAfterWrappedLiveLineStartsClean(t *testing.T) {
 	}
 	if got := strings.Count(strings.Join(screenRows(scr), "\n"), "11:01:05"); got != 1 {
 		t.Errorf("live timestamp appears %d times: %q", got, screenRows(scr))
-	}
-}
-
-// TestDisplayReflowCreepRepro reproduces the user's report on a REFLOWING
-// terminal (Windows Terminal / Terminal.app / iTerm2 re-wrap existing
-// lines on resize; xterm/gnome-terminal do not — the model used elsewhere
-// in this package). After a shrink the live line wrapped (rows 2-3 at 60
-// cols); the terminal then grows to 120 and REFLOWS the line back to one
-// row (row 1, cursor at its end). The fix (DECISIONS #66) queries the
-// terminal's cursor position and re-anchors from where the terminal
-// actually put the line, so the next write paints it at row 1 — the
-// pre-#66 display walked back one row too far and painted it at row 0,
-// destroying the header (the creep-up / "does not clear the rest" report).
-func TestDisplayReflowCreepRepro(t *testing.T) {
-	var buf bytes.Buffer
-	d, wPtr, _ := newTestDisplayResizable(&buf, false, false, true, 60, 24)
-	*wPtr = 60
-	// The fake terminal answers DSR/CPR with its simulated cursor row:
-	// during the 60-col era the cursor sits on the live line's start row
-	// (CPR row 3 = emulator row 2); after the reflow to 120 it sits at the
-	// end of the re-wrapped line (CPR row 2 = emulator row 1).
-	reanchor := func() (int, bool) {
-		if *wPtr == 120 {
-			return 2, true
-		}
-		return 3, true
-	}
-	d.reanchor = reanchor
-	d.Handle(changeEvent(t0, state.StatusUp))
-	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
-		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0)) // live up: 69 cells
-
-	// The reflowing terminal grows to 120 and re-wraps what is on screen:
-	// header (78 cells) → row 0, live line (69 cells) → row 1, cursor at
-	// the end of row 1. Rebuild that state explicitly (CRLF — a bare LF
-	// would not reset the column, DECISIONS #54).
-	scr := newTermScreen(24, 120)
-	scr.feed(d.layout.Header() + "\r\n" + d.layout.FormatLiveLine(*d.cur, frameChar(d.frame)))
-
-	// The display's next write re-anchors via CPR and must paint the line
-	// at the reflowed position (row 1), leaving the header intact.
-	buf.Reset()
-	*wPtr = 120
-	d.Tick()
-	scr.feed(buf.String())
-
-	if !strings.HasPrefix(scr.line(1), "11:00:35") {
-		t.Errorf("live line not at the reflowed anchor (row 1): row1=%q (creep-up)", scr.line(1))
-	}
-	if !strings.HasPrefix(scr.line(0), "TIME") {
-		t.Errorf("header overwritten by creep-up: row0=%q", scr.line(0))
-	}
-}
-
-// TestWindowReflowReanchors: the window block gets the same CPR re-anchor
-// as the live line (DECISIONS #66) — after a reflowing-terminal resize the
-// block must repaint at the position the terminal re-wrapped it to, not
-// where the stale bookkeeping thinks it is.
-func TestWindowReflowReanchors(t *testing.T) {
-	var buf bytes.Buffer
-	w, wPtr, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
-	*wPtr = 60
-	// CPR answers: at 60 the block top is row 1 (1-based); after the
-	// reflow to 120 the cursor sits at the end of the re-wrapped 6-row
-	// block (row 6, 1-based).
-	w.reanchor = func() (int, bool) {
-		if *wPtr == 120 {
-			return 6, true
-		}
-		return 1, true
-	}
-	w.Handle(changeEvent(t0, state.StatusUp))
-	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
-		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0)) // live up: 69 cells
-
-	// Reflowing terminal grows to 120: header → row 0, live → row 1,
-	// padding rows 2-5; cursor at the end of row 5.
-	scr := newTermScreen(24, 120)
-	scr.feed(w.layout.Header() + "\r\n" + w.layout.FormatLiveLine(*w.cur, frameChar(w.frame)))
-	for r := 2; r < 6; r++ {
-		scr.feed("\r\n")
-	}
-
-	buf.Reset()
-	*wPtr = 120
-	w.Tick() // re-anchors via CPR, then redraws the block at rows 0-5
-	scr.feed(buf.String())
-
-	if !strings.HasPrefix(scr.line(0), "TIME") {
-		t.Errorf("block header not at row 0 after re-anchor: row0=%q", scr.line(0))
-	}
-	if !strings.HasPrefix(scr.line(1), "11:00:35") {
-		t.Errorf("live line not at row 1 after re-anchor: row1=%q", scr.line(1))
-	}
-	for r := 6; r < scr.rows; r++ {
-		if got := scr.line(r); got != "" {
-			t.Errorf("row %d not blank below the re-anchored block: %q", r, got)
-		}
-	}
-}
-
-// TestDisplayNoReflowWhenCursorAgrees: on a NON-reflowing terminal a width
-// change leaves the cursor exactly where the display put it — the CPR
-// answer agrees with the bookkeeping and the behavior is unchanged
-// (walk-back + defensive clear). This is what keeps xterm/gnome-terminal
-// users' behavior identical to before the #66 re-anchor.
-func TestDisplayNoReflowWhenCursorAgrees(t *testing.T) {
-	var buf bytes.Buffer
-	d, wPtr, _ := newTestDisplayResizable(&buf, false, false, true, 60, 24)
-	*wPtr = 60
-	row := 3 // CPR row of the live line's start (1-based) — first write
-	d.reanchor = func() (int, bool) { return row, true }
-	d.Handle(changeEvent(t0, state.StatusUp))
-	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
-		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
-	frame1 := buf.String()
-
-	// Non-reflowing grow to 120: the line STAYS wrapped at rows 2-3 (the
-	// terminal does not re-wrap); the cursor is at the end of row 3, which
-	// is exactly where the display's bookkeeping expects it (CPR row 4).
-	row = 4
-	buf.Reset()
-	*wPtr = 120
-	d.Tick()
-	frame2 := buf.String()
-
-	scr := newTermScreen(24, 60)
-	scr.feed(frame1)
-	scr.resize(120) // non-reflowing resize: cells keep their positions
-	scr.feed(frame2)
-	if !strings.HasPrefix(scr.line(0), "TIME") {
-		t.Errorf("header not at row 0: %q", scr.line(0))
-	}
-	if !strings.HasPrefix(scr.line(2), "11:00:35") {
-		t.Errorf("live line not at row 2 (no-reflow case): row2=%q", scr.line(2))
-	}
-	if got := scr.line(3); got != "" {
-		t.Errorf("stale tail not cleared in the no-reflow case: row3=%q", got)
 	}
 }
 

@@ -36,10 +36,11 @@ import (
 // only the rendering differs.
 //
 // REFLOWING terminals re-wrap the block on resize (see Display doc —
-// DECISIONS #66): when the width changes, the block queries the terminal's
-// cursor position (DSR/CPR via the app's reanchor callback) — the cursor
-// sits at the end of the re-wrapped block — and recomputes the block's
-// top row from where the terminal actually put it.
+// DECISIONS #67): when the width changes the block FREEZES redraws until
+// the terminal settles, then restarts on a fresh row below the frozen
+// rendering; the old block stays in scrollback as history. The CPR
+// re-anchor (#66) was removed — ConPTY's cursor positions are unreliable
+// on resize (microsoft/terminal#18725).
 type Window struct {
 	w        io.Writer
 	layout   *Layout
@@ -47,25 +48,22 @@ type Window struct {
 	quiet    bool
 	noHeader bool
 	sizeFn   func() (width, height int) // terminal size; 0 = unknown
-	reanchor func() (row int, ok bool)  // terminal cursor row via DSR/CPR (1-based); nil = never
 	now      func() time.Time
 
-	started      bool
-	lastPhysRows int    // PHYSICAL rows the block occupied in the previous frame
-	history      []Line // finalized lines, bounded to lines-1
-	cur          *Line  // current live line
-	frame        int    // liveness animation frame (advances on Tick)
-	lastWidth    int    // terminal width at the last redraw (0 = unknown)
-	anchor       int    // cursor row (CPR base) where the block starts
-	haveAnchor   bool   // anchor calibrated (first redraw / first reflow)
+	started       bool
+	lastPhysRows  int       // PHYSICAL rows the block occupied in the previous frame
+	history       []Line    // finalized lines, bounded to lines-1
+	cur           *Line     // current live line
+	frame         int       // liveness animation frame (advances on Tick)
+	lastWidth     int       // terminal width at the last redraw (0 = unknown)
+	resizeSince   time.Time // when the current width change was first observed
+	resizePending bool      // width changed; redraws frozen until the terminal settles
 }
 
 // NewWindow builds a window display. lines is the visible data-line count
 // (--window-lines); sizeFn returns the terminal size in cells (0 =
 // unknown → startup column policy, full configured window height).
-// reanchor queries the terminal's cursor row (DSR/CPR) after a width
-// change (nil disables re-anchoring).
-func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, sizeFn func() (width, height int), reanchor func() (row int, ok bool)) *Window {
+func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, sizeFn func() (width, height int)) *Window {
 	return &Window{
 		w:        w,
 		layout:   layout,
@@ -73,7 +71,6 @@ func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, siz
 		quiet:    quiet,
 		noHeader: noHeader,
 		sizeFn:   sizeFn,
-		reanchor: reanchor,
 		now:      time.Now,
 	}
 }
@@ -129,6 +126,11 @@ func (w *Window) Finalize() {
 	ln.Duration = w.now().Sub(ln.Time)
 	w.pushHistory(ln)
 	w.cur = nil
+	// A resize in flight forces the restart: the final block must land
+	// below the frozen rendering, never reclaim it (DECISIONS #67).
+	tw, _ := w.terminalSize()
+	w.resizeNote(tw)
+	w.resizeRestart()
 	w.Redraw()
 	fmt.Fprint(w.w, "\r\n")
 }
@@ -164,6 +166,20 @@ func (w *Window) Redraw() {
 	tw, th := 0, 0
 	if w.sizeFn != nil {
 		tw, th = w.sizeFn()
+	}
+	// RESIZE (DECISIONS #67): freeze redraws while the width is settling —
+	// a reflowing terminal re-wraps the block and its position is
+	// unknowable mid-reflow (the CPR re-anchor of #66 failed on ConPTY,
+	// which reports unreliable cursor positions — microsoft/terminal
+	// #18725). Once settled, restart the block on a fresh row below the
+	// frozen rendering; the old block stays in scrollback as history.
+	w.resizeNote(tw)
+	if w.resizePending {
+		if w.now().Sub(w.resizeSince) >= resizeSettleDelay {
+			w.resizeRestart()
+		} else {
+			return // mid-reflow: defer the redraw
+		}
 	}
 	if tw > 0 {
 		w.layout.Resize(tw)
@@ -202,27 +218,10 @@ func (w *Window) Redraw() {
 		totalPhys += physicalRows(cellWidth(s), tw)
 	}
 
-	// Reflowing-terminal re-anchor (DECISIONS #66): when the width
-	// changed since the last redraw, query the terminal's cursor row —
-	// the cursor sits at the end of the (re-wrapped) block — and recompute
-	// the block's top from where the terminal actually put it. On
-	// non-reflowing terminals the cursor agrees with our bookkeeping and
-	// nothing changes; on terminals that do not answer, degrade.
-	if tw > 0 && tw != w.lastWidth && w.reanchor != nil {
-		w.lastWidth = tw
-		if row, ok := w.reanchor(); ok {
-			if !w.haveAnchor {
-				// First draw: the cursor is at the block's top row.
-				w.anchor = row
-				w.haveAnchor = true
-			} else if row != w.anchor+w.lastPhysRows-1 {
-				// Reflow: the block was re-wrapped; the cursor is at the
-				// end of its last row.
-				w.anchor = row - (totalPhys - 1)
-				w.lastPhysRows = totalPhys
-			}
-		}
-	}
+	// Reflowing-terminal re-anchor was removed with the CPR machinery
+	// (DECISIONS #67): ConPTY's cursor positions are unreliable on resize,
+	// so the block never reclaims a reflowed rendering — it freezes, then
+	// restarts below (see the resizeNote block at the top of Redraw).
 
 	var sb strings.Builder
 	if w.started && w.lastPhysRows > 1 {
@@ -297,6 +296,37 @@ func (w *Window) terminalSize() (int, int) {
 		return 0, 0
 	}
 	return w.sizeFn()
+}
+
+// resizeNote records a width change (DECISIONS #67): the first observation
+// just calibrates lastWidth; a real change marks the window frozen
+// (resizePending) until the width has been stable for resizeSettleDelay.
+// No-op when the width is unknown (≤ 0).
+func (w *Window) resizeNote(tw int) {
+	if tw <= 0 {
+		return
+	}
+	if w.lastWidth == 0 {
+		w.lastWidth = tw
+		return
+	}
+	if tw != w.lastWidth {
+		w.lastWidth = tw
+		w.resizeSince = w.now()
+		w.resizePending = true
+	}
+}
+
+// resizeRestart moves the block below the frozen (re-wrapped) rendering
+// and resets the wrap bookkeeping to the fresh row. No-op unless a resize
+// is pending (DECISIONS #67).
+func (w *Window) resizeRestart() {
+	if !w.resizePending {
+		return
+	}
+	w.resizePending = false
+	fmt.Fprint(w.w, "\r\n")
+	w.lastPhysRows = 1
 }
 
 // finalizeLine moves the current line into bounded history when a status

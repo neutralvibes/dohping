@@ -165,7 +165,7 @@ func (s *noOnlcrScreen) line(r int) string {
 func TestExitSummaryRenderedAtColumnZero(t *testing.T) {
 	var buf bytes.Buffer
 	layout := output.NewLayout("google.com", "HH:MM:SS", nil)
-	d := output.NewDisplay(&buf, layout, false, false, true, nil, nil) // live
+	d := output.NewDisplay(&buf, layout, false, false, true, nil) // live, no sizeFn
 	d.SetNow(func() time.Time { return t0.Add(time.Minute) })
 
 	// A status change + probe successes (the -c N run), then shutdown.
@@ -216,32 +216,5 @@ func TestExitSummaryRenderedAtColumnZero(t *testing.T) {
 	}
 	if !strings.HasPrefix(summaryRows[1], "host:            google.com") {
 		t.Errorf("host row = %q, want left-aligned label", summaryRows[1])
-	}
-}
-
-func TestParseCPR(t *testing.T) {
-	// DSR/CPR: \x1b[<row>;<col>R, 1-based. Malformed responses must be
-	// rejected so a garbage sequence can never corrupt the anchor.
-	cases := []struct {
-		in       string
-		row, col int
-		ok       bool
-	}{
-		{"1;1", 1, 1, true},
-		{"5;80", 5, 80, true},
-		{"24;120", 24, 120, true},
-		{"", 0, 0, false},
-		{"1", 0, 0, false},
-		{"1;", 0, 0, false},
-		{";1", 0, 0, false},
-		{"a;b", 0, 0, false},
-		{"0;1", 0, 0, false}, // 0-based reports are not valid CPR
-		{"1;0", 0, 0, false},
-	}
-	for _, c := range cases {
-		row, col, ok := parseCPR([]byte(c.in))
-		if row != c.row || col != c.col || ok != c.ok {
-			t.Errorf("parseCPR(%q) = %d,%d,%v, want %d,%d,%v", c.in, row, col, ok, c.row, c.col, c.ok)
-		}
 	}
 }
