@@ -1,11 +1,11 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (68 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (69 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
 
-**Status: build complete. All 6 phases green. Acceptance rounds 1–10 shipped
-(DECISIONS #50–68, 2026-08-17/18). Round 8's CPR re-anchor (#66) FAILED the
+**Status: build complete. All 6 phases green. Acceptance rounds 1–11 shipped
+(DECISIONS #50–69, 2026-08-17/18). Round 8's CPR re-anchor (#66) FAILED the
 user's real-terminal test ("still not working") and was replaced in round 9
 (#67) by freeze-and-restart: on a width change the displays pause in-place
 updates until the width is stable (300ms, restarted by every further change),
@@ -19,10 +19,14 @@ the frozen row is marked with a single `-` (safe only when the line was one
 row before and after the resize), and STATUS → STATE with `?` for the
 never-established status — the minimum line dropped from 81 to 79 cells,
 under 80. #67/#68 are position-independent and fully sandbox-tested; the
-user's own terminal test is the remaining gate. User-verified so far:
-window mode in place, flags on either side of HOST, bare-seconds
-interval/timeout, clean exit summary, the liveness animation, the
-window-mode resize fix, and the freeze/restart resize behavior.**
+user's own terminal test was the remaining gate and is now CLOSED for plain
+view (DECISIONS #69, 2026-08-18: "the last change for the plain view appears
+to be working on resize and provides a much nicer visual" — frozen `-` rows
+stay in scrollback, live line continues fresh below; 5 stacked frozen rows
+observed under repeated resizing). User-verified so far: window mode in
+place, flags on either side of HOST, bare-seconds interval/timeout, clean
+exit summary, the liveness animation, the window-mode resize fix, and the
+freeze/restart resize behavior (both views, incl. the `-` mark in plain).**
 
 ---
 
@@ -93,7 +97,10 @@ and stage-marking; if in doubt, ASK, don't assume).
 
 ## 4. Pending / next actions
 
-- **User is mid-testing the #64 resize fix** — no outstanding agent tasks.
+- **User confirmed the plain-view resize fix on the real terminal (2026-08-18,
+  DECISIONS #69)** — freeze-and-restart reads well ("much nicer visual");
+  the last open user gate for the resize work is closed for plain mode.
+  No outstanding agent tasks.
   If the user reports another acceptance issue: reproduce, fix, add regression test, re-run gates,
   rebuild `dist/` via `scripts/release.sh`, republish to the rig (§6), record
   DECISIONS + CHECKPOINT entries, commit.
@@ -102,18 +109,18 @@ and stage-marking; if in doubt, ASK, don't assume).
 - **Animation is user-testing territory**: the rising-bar placement (col 47) and
   the 1-second ticker were both corrected after user reports — if placement or
   cadence comes up again, verify against the rendered-screen tests first.
-- **Resize is user-testing territory**: the #64/#65/#66 work (HOST column
+- **Resize is user-testing territory**: the #64/#65/#67/#68 work (HOST column
   retraction/expansion, `…` truncation at min width, below-floor wrap
-  staying coherent, plain live line staying anchored, reflowing-terminal
-  CPR re-anchor) was proven in-unit and in a real PTY
-  (scripts/pty-resize-probe.py — `window` and `plain` scenarios, which now
-  answer DSR/CPR queries from the live emulator cursor), but only the
-  user's terminal is the final acceptance gate. If a resize report comes
-  back, re-verify against the width-injected window/display tests first.
-- **CPR nuance**: the re-anchor only engages when stdin is a terminal and
-  the terminal answers DSR/CPR (all real terminals do). Piped stdin or a
-  dumb terminal degrades to the #65 relative behavior. Windows Terminal:
-  VT input enabled by x/term's MakeRaw — but the Windows binary is still
+  staying coherent, plain live line staying anchored, freeze-and-restart with
+  the `-` mark) was proven in-unit and in a real PTY
+  (scripts/pty-resize-probe.py — `window` and `plain` scenarios), and the
+  plain-view behavior is now user-confirmed (#69); window mode's frozen-block
+  behavior was confirmed in round 10. If a resize report comes back, re-verify
+  against the width-injected window/display tests first.
+- **No terminal cooperation is relied on** (#67): freeze-and-restart is
+  position-independent and needs no DSR/CPR answer — identical on reflowing
+  and non-reflowing terminals. Piped stdin or a dumb terminal degrades to
+  no-live/plain behavior. Windows Terminal: the Windows binary is still
   never run; first Windows smoke should resize in window mode to confirm.
 - Areas the user has NOT explicitly verified yet (candidates to probe if asked):
   TCP probe mode (`-p tcp`), `--log-file` output (now 0600 — user may notice),
