@@ -77,6 +77,7 @@ for item in "${PUBLIC_ITEMS[@]}"; do
     mkdir -p "$PUB/$item"
     cp -r "$item"/. "$PUB/$item"/
   else
+    mkdir -p "$PUB/$(dirname "$item")"
     cp "$item" "$PUB/$item"
   fi
 done
