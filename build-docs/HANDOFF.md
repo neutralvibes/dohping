@@ -133,6 +133,10 @@ Full per-fix history: DECISIONS.md (78 entries, each with rationale).
   "Hermes Agent <hermes@hermes.home>") BEFORE the first push — nothing pushed
   yet, so the rewrite is free — and fill the LICENSE holder line with the
   same name. Public history should then carry zero agent trace.
+  **OPEN DECISIONS (parked 2026-08-18 — user decides fresh, NOT the agent):
+  (1) first-commit message wording ("Initial release" + tag v0.1.0 vs the
+  message itself being "v0.1.0"); (2) annotated version tags on every
+  publish — yes/no. See build-docs/PUBLISH-CHECKLIST.md.**
 
 - **Resize: RESOLVED and SHIPPED (#78).** If a resize report comes back, the
   evidence path is the debug log (`DOHPING_DEBUG=<path> dohping --window HOST`
@@ -367,9 +371,15 @@ The repo is destined for GitHub. Two layers keep the internal build docs out:
   exists yet, so no required checks until one has run. When the §10 CI
   workflow ships: run it once on a branch, THEN add its checks as required
   status checks (requiring a never-run check deadlocks every PR).
-- **README is the only public doc.** It must never reference build-docs/
-  files (scrubbed 2026-08-18; development section now points at release.sh +
-  pty-resize-probe.py).
+- **Commit-message hygiene (2026-08-18):** public commits must read as the
+  user wrote them — no agent tells (semicolon clause-chains, conventional-
+  commit prefixes, process metadata like private shas/timestamps). The gate
+  is `build-docs/PUBLISH-CHECKLIST.md` (consult before EVERY push; the
+  publish script's footer reminds) + a pre-commit hook in publish/.git that
+  HARD-REFUSES commits whose email is missing or hermes@hermes.home (script
+  installs it on init; currently also installed manually). Traceability
+  between public and private commits lives in `build-docs/PUBLISH-LOG.md`
+  (private) — never in public messages.
 - **LICENSE = MIT**, holder line still `<YOUR NAME HERE>` — user must fill
   before first push. Publish commits inherit the private repo's git identity
   (Hermes Agent <hermes@hermes.home>) unless the user overrides in publish/.

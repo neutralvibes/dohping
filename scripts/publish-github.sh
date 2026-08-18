@@ -70,6 +70,16 @@ if [ ! -d "$PUB/.git" ]; then
   priv_email="$(git config user.email || true)"
   [ -n "$priv_name" ] && git -C "$PUB" config user.name "$priv_name" || true
   [ -n "$priv_email" ] && git -C "$PUB" config user.email "$priv_email" || true
+  # Hard gate: public commits must carry the user's identity, never the agent's.
+  cat > "$PUB/.git/hooks/pre-commit" <<'EOF'
+#!/usr/bin/env bash
+email="$(git config user.email)"
+if [ -z "$email" ] || [ "$email" = "hermes@hermes.home" ]; then
+  echo "pre-commit: refusing — public commits must carry the user's GitHub identity (set git -C publish config user.email)" >&2
+  exit 1
+fi
+EOF
+  chmod +x "$PUB/.git/hooks/pre-commit"
 fi
 
 # Copy the public items.
@@ -129,3 +139,4 @@ echo "Push workflow (agent-handled, user-approved):"
 echo "  the agent adds the origin remote, pushes publish/ master to a branch,"
 echo "  and opens a PR; the user approves the merge to main. This script never"
 echo "  pushes on its own."
+echo "  BEFORE PUSHING: review build-docs/PUBLISH-CHECKLIST.md (identity, wording, tags)."
