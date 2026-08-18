@@ -164,6 +164,36 @@ every event. IPv6 hosts are bracketed (`[::1]`).
 {"time":"2026-08-16T11:00:35+01:00","host":"192.168.1.23","status":"up","duration_seconds":2126,"min_ms":1.7,"max_ms":5.9,"avg_ms":2.7,"fails":0}
 ```
 
+## Debug logging
+
+`DOHPING_DEBUG=PATH` enables an optional diagnostic log appended to PATH
+(created 0600, same permissions as `--log-file`; a path that cannot be
+opened disables the facility with a warning — diagnostics never break a
+run). Off by default; enabled only by the environment variable (or in
+code, for tests).
+
+The display owns the terminal, so debug output never goes there — it is
+file-only by design. Each line is `RFC3339-milliseconds [tag] message`.
+Tags: `display` (mode selection), `winch` (SIGWINCH received), `tick`
+(1s repaint), `resize` (width observations and the freeze/defer
+decision), `redraw` (suppressed, deferred, released, restarted, and
+completed repaints).
+
+This is the app's own width telemetry. No terminal displays the width it
+is resizing to, so a drag's sweep — every width passed, whether the
+block froze or deferred, and where the settle repaint landed — is
+reconstructable from this file alone. When diagnosing resize fractures:
+run `DOHPING_DEBUG=/tmp/dohping-debug.log dohping --window HOST`, drag
+the window around, then inspect the log.
+
+```text
+2026-08-18T15:14:46.276+01:00 [winch] SIGWINCH received → repaint
+2026-08-18T15:14:46.276+01:00 [resize] 60→55 rows 11→11 → defer (in-place after settle)
+2026-08-18T15:14:46.276+01:00 [redraw] deferred (settle, 299.9ms left)
+2026-08-18T15:14:47.276+01:00 [redraw] defer released → in-place repaint
+2026-08-18T15:14:47.276+01:00 [redraw] repainted tw=55 phys=11 (was 11) rows=11
+```
+
 ## Exit codes
 
 | Code | Meaning |

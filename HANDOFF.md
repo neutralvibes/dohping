@@ -69,6 +69,20 @@ claims the new row). Same-band blocks never restart and leave no frozen
 artifact. Finalize forces the render. README note updated (the residual
 ConPTY cursor-placement race after the reflow settles remains the
 documented floor). dist sha 44c82b29….
+Round 16 (DECISIONS #74, 2026-08-18): DEBUG LOGGING FACILITY — new
+`internal/debugx` package, enabled ONLY by `DOHPING_DEBUG=<path>` (or
+`SetWriter` in code/tests), file-only (the display owns the terminal),
+0600, RFC3339-ms `[tag]` lines. Hook points are the app's own width
+observations: `display` (mode), `winch` (SIGWINCH), `tick` (1s repaint),
+`resize` (every width change + freeze/defer decision with physical-row
+counts), `redraw` (suppressed/deferred/released/restarted + the settle
+repaint's phys span). The user's point: no terminal displays the width
+while resizing, so a drag's sweep is reconstructable only from the app's
+log — screenshots and pastes can't show it. End-to-end proof via the PTY
+probe (window-same-band): winch → resize 60→55 rows 11→11 → defer →
+two suppressed redraws → defer released → repainted tw=55 phys=11 (was
+11). gosec G703 annotated (taint twin of G304, same operator boundary).
+dist sha e1221b96….
 
 ---
 
@@ -144,26 +158,20 @@ and stage-marking; if in doubt, ASK, don't assume).
 | 66 | REFLOWING-terminal re-anchor via DSR/CPR (root fix for "creep up / does not clear the rest on wrap"): on width change, query the cursor (`\x1b[6n` → `\x1b[<r>;<c>R`, app-owned, key reader parses CSI, 150ms timeout, degrade on no-answer); cursor sits at the end of the re-wrapped line → recompute anchor. Discriminator: CPR row == bookkeeping expectation → no reflow → non-reflowing terminals byte-identical to #65. Both displays (plain live + window block — retires the #64 window creep too). x/term Windows MakeRaw sets ENABLE_VIRTUAL_TERMINAL_INPUT (verified) | "It can creep up and does not clear the rest on wrap" + option A chosen ("lets try your recommendation") |
 | 70 | Window-mode resize freeze is CONDITIONAL: freeze only when the reflow would move the block (any row of the last completed frame changes its physical row count at the new width — observeResize compares Σ physicalRows(lastRows, newW) vs lastPhysRows); same-band resizes repaint in place, no frozen block left behind. Pending freeze still restarts the settle clock on every further width change (drag behavior unchanged). PLAIN display untouched. User's column-trim idea parked (window mode may be rethought) | "This happens on resize window mode, making it less wider causes it" — user's ~55–60 col terminal stacked a frozen block per width change; #67 froze on every change even when the layout absorbed it (60→55 = 12 rows both widths; same-band lines cannot move in a reflow — the #68 safety reasoning generalized). Screenshot proved AVG 3.92 wrapping mid-value |
 | 71 | WINDOW-MODE COLUMN TRIM (the user's original idea): below the 79-cell line minimum the rightmost columns drop (FAILS→AVG→MAX→MIN, header in sync) so the line fits instead of wrapping — down to essentials TIME/HOST/STATE/DURATION (46 cells; the live line's animation frame keeps DURATION untrimmed). HOST retracts first (#64), then columns. Plain untouched. Combined with #70, window-mode resize is now a uniform in-place repaint at any width ≥ 46 — the freeze is only reachable below 46 | "My terminal doesn't live in any band, I am testing so use it accordingly" — #70 only separated same-band from crossing, and free testing crosses constantly; trimming eliminates the crossings themselves. Built after the conditional freeze proved invisible to the user's testing |
+| 74 | Optional debug logging facility (`internal/debugx`): no-op by default, enabled ONLY by `DOHPING_DEBUG=<path>` (or `SetWriter` in code/tests); appends RFC3339-ms `[tag]` lines to a 0600 file. Tags: `display` (mode), `winch` (SIGWINCH), `tick` (1s repaint), `resize` (every width change + freeze/defer decision with physical-row counts), `redraw` (suppressed/deferred/released/restarted + settle repaint's phys span — a shifted block = span mismatch). A path that cannot be opened disables with a stderr warning (never breaks a run); file-only because the display owns the terminal. Verified end-to-end via the PTY probe: winch → resize 60→55 rows 11→11 → defer → 2 suppressed redraws → defer released → repainted tw=55 phys=11 (was 11) | "Have you even seen a terminal tell you the width you are resizing to?" — no terminal displays the width during a drag; asking the user to report widths or whether the drag "dipped below 46" asked them to read a display that doesn't exist (same class of mistake as paste-blindness). The app is the only instrument that sees every width in the sweep, so the evidence must come from its own log. "Add it, perhaps we should have had a facility for a debug logger already, just only enabled by code or ENV" — general facility (env-or-code), of which the resize forensics are the first consumers. gosec G703 annotated (taint twin of G304 on the same line; operator trust boundary identical to `--log-file`, #63 precedent) |
 
 ## 4. Pending / next actions
 
 - **User confirmed the plain-view resize fix on the real terminal (2026-08-18,
   DECISIONS #69)** — freeze-and-restart reads well ("much nicer visual").
-- **Round 13 (#71) USER-ACCEPTED with a caveat (2026-08-18, DECISIONS #72)**:
-  window mode trims rightmost columns below 79 cells so the line never
-  wraps — resize is a uniform in-place repaint at any width ≥ 46. The user
-  confirmed "works much better" but "sometimes it still wraps" — accepted
-  as a lived-with limitation with a README note (resizing terminals can
-  fracture output; mechanisms documented: reflowing-terminal drag race,
-  sub-46 wrap by design, RTT ≥ 10,000 ms column overflow). PLAIN display
-  deliberately untouched. **Round 15 (#73) then addressed the fracture
-  trigger: same-band repaints are DEFERRED for the 300ms settle after ANY
-  width change (no writes mid-reflow; the user's "when it wraps it creates
-  another area to write to" — an event redraw lands a row off mid-reflow),
-  shipped 2026-08-18, dist sha 44c82b29…, awaiting the user's test.** If
-  the user reports another acceptance issue: reproduce, fix, add regression
-  test, re-run gates, rebuild `dist/` via `scripts/release.sh`, republish
-  to the rig (§6), record DECISIONS + CHECKPOINT entries, commit.
+- **Round 15 (#73) shipped 2026-08-18 (dist sha 44c82b29…); round 16
+  (#74) added the debug logging facility as the evidence path — the
+  user's next drag-test runs with `DOHPING_DEBUG=/tmp/dohping-debug.log`
+  and the LOG (not screenshots/pastes, which are wrap-blind) is the
+  evidence for any residual fracture.** If the user reports another
+  acceptance issue: reproduce, fix, add regression test, re-run gates,
+  rebuild `dist/` via `scripts/release.sh`, republish to the rig (§6),
+  record DECISIONS + CHECKPOINT entries, commit.
 - **HELD PLAN — reusable terminal test rig** (idea user-approved 2026-08-18,
   build explicitly on hold until user says go): full plan in §10.
 - **Animation is user-testing territory**: the rising-bar placement (col 47) and
@@ -217,8 +225,8 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `44c82b29df42…` (2026-08-18, round #73:
-  deferred same-band repaints; served = dist, verified byte-identical over TLS).
+- Current published linux-amd64 sha: `e1221b9600c5…` (2026-08-18, round #74:
+  debug logging facility; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works
@@ -267,6 +275,16 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   columns. Never conclude "no wrap / no reflow" from a user's paste geometry;
   the user's own screen is the evidence (they send screenshots now). Pastes
   are weak evidence; the emulator tests and PTY probe are the proof.
+- **Resize forensics via the debug log (DECISIONS #74)**: for the user's
+  real-terminal drag tests, the evidence is `DOHPING_DEBUG=<path> dohping
+  --window HOST` — the app logs its own width observations (`winch`, `tick`,
+  `resize` with the freeze/defer decision, `redraw` with the settle repaint's
+  phys span). No terminal displays the width during a drag, so this log is
+  the only record of the sweep; ask the user for it instead of widths or
+  screenshots. Tags and format: `internal/debugx` + README "Debug logging".
+  The PTY probe passes the env var through (verified: the window-same-band
+  run produced the full episode: winch → resize 60→55 rows 11→11 → defer →
+  suppressed redraws → defer released → repainted tw=55 phys=11 (was 11)).
 - Regression tests must accompany every acceptance fix (that's the established
   pattern, #50–66 all have them).
 
@@ -295,6 +313,7 @@ internal/state/              engine, hysteresis, RTT stats, events
 internal/output/             Layout/format, plain Display, Window (in-place)
 internal/theme/              role-based ANSI color rules
 internal/logx/               text/JSON log files
+internal/debugx/             optional DOHPING_DEBUG diagnostic logger (#74)
 internal/signalx/            SIGINT/SIGTERM listen, SIGWINCH (unix/windows split)
 scripts/release.sh           cross-compile + SHA256SUMS
 dist/                        release artifacts (5 binaries + sums)
