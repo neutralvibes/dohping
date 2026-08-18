@@ -36,11 +36,16 @@ import (
 // only the rendering differs.
 //
 // REFLOWING terminals re-wrap the block on resize (see Display doc —
-// DECISIONS #67): when the width changes the block FREEZES redraws until
+// DECISIONS #67): when the width changes, the block FREEZES redraws until
 // the terminal settles, then restarts on a fresh row below the frozen
 // rendering; the old block stays in scrollback as history. The CPR
 // re-anchor (#66) was removed — ConPTY's cursor positions are unreliable
-// on resize (microsoft/terminal#18725).
+// on resize (microsoft/terminal#18725). DECISIONS #70: the freeze is
+// CONDITIONAL — it fires only when the reflow would actually move the
+// block (any line of the last completed frame changes its physical row
+// count at the new width). A same-band resize (every line keeps its rows,
+// so a reflow leaves the block untouched) repaints in place at the new
+// columns instead of leaving a frozen block behind.
 type Window struct {
 	w        io.Writer
 	layout   *Layout
@@ -58,6 +63,7 @@ type Window struct {
 	lastWidth     int       // terminal width at the last redraw (0 = unknown)
 	resizeSince   time.Time // when the current width change was first observed
 	resizePending bool      // width changed; redraws frozen until the terminal settles
+	lastRows      []string  // rendered rows of the last COMPLETED frame (resize reflow check)
 }
 
 // NewWindow builds a window display. lines is the visible data-line count
@@ -127,9 +133,10 @@ func (w *Window) Finalize() {
 	w.pushHistory(ln)
 	w.cur = nil
 	// A resize in flight forces the restart: the final block must land
-	// below the frozen rendering, never reclaim it (DECISIONS #67).
+	// below the frozen rendering, never reclaim it (DECISIONS #67). The
+	// freeze decision itself is conditional (#70) — observeResize.
 	tw, _ := w.terminalSize()
-	w.resizeNote(tw)
+	w.observeResize(tw)
 	w.resizeRestart()
 	w.Redraw()
 	fmt.Fprint(w.w, "\r\n")
@@ -167,13 +174,16 @@ func (w *Window) Redraw() {
 	if w.sizeFn != nil {
 		tw, th = w.sizeFn()
 	}
-	// RESIZE (DECISIONS #67): freeze redraws while the width is settling —
-	// a reflowing terminal re-wraps the block and its position is
-	// unknowable mid-reflow (the CPR re-anchor of #66 failed on ConPTY,
+	// RESIZE (DECISIONS #67 + #70): freeze redraws while the width is
+	// settling — a reflowing terminal re-wraps the block and its position
+	// is unknowable mid-reflow (the CPR re-anchor of #66 failed on ConPTY,
 	// which reports unreliable cursor positions — microsoft/terminal
-	// #18725). Once settled, restart the block on a fresh row below the
-	// frozen rendering; the old block stays in scrollback as history.
-	w.resizeNote(tw)
+	// #18725). The freeze is conditional (#70): only a width change that
+	// would MOVE the last completed frame (a line crossing a wrap
+	// boundary) freezes; same-band changes repaint in place. Once settled,
+	// restart the block on a fresh row below the frozen rendering; the
+	// old block stays in scrollback as history.
+	w.observeResize(tw)
 	if w.resizePending {
 		if w.now().Sub(w.resizeSince) >= resizeSettleDelay {
 			w.resizeRestart()
@@ -254,6 +264,7 @@ func (w *Window) Redraw() {
 	}
 	w.started = true
 	w.lastPhysRows = totalPhys
+	w.lastRows = rowStrs
 	fmt.Fprint(w.w, sb.String())
 }
 
@@ -298,11 +309,21 @@ func (w *Window) terminalSize() (int, int) {
 	return w.sizeFn()
 }
 
-// resizeNote records a width change (DECISIONS #67): the first observation
-// just calibrates lastWidth; a real change marks the window frozen
-// (resizePending) until the width has been stable for resizeSettleDelay.
-// No-op when the width is unknown (≤ 0).
-func (w *Window) resizeNote(tw int) {
+// observeResize records a width change and decides whether the block must
+// freeze (DECISIONS #67 + #70). A reflowing terminal re-wraps existing
+// lines on width change, but a line that keeps its physical row count
+// cannot move in a reflow (it fits in the same rows at both widths — the
+// DECISIONS #68 safety reasoning, generalized from one line to the whole
+// block). So the block may be reclaimed in place exactly when every row
+// of the last COMPLETED frame occupies the same number of physical rows
+// at the new width as it did at the old one; if any row's count changes,
+// the block would move and redraws FREEZE until the width has been stable
+// for resizeSettleDelay, then restart below the frozen rendering. While a
+// freeze is pending, every further width change restarts the settle clock
+// (a drag extends the freeze). The first observation only calibrates
+// lastWidth; no decision runs before a frame has been completed. No-op
+// when the width is unknown (≤ 0).
+func (w *Window) observeResize(tw int) {
 	if tw <= 0 {
 		return
 	}
@@ -310,8 +331,25 @@ func (w *Window) resizeNote(tw int) {
 		w.lastWidth = tw
 		return
 	}
-	if tw != w.lastWidth {
-		w.lastWidth = tw
+	if tw == w.lastWidth {
+		return
+	}
+	w.lastWidth = tw
+	if w.resizePending {
+		// Already frozen: keep freezing and restart the settle clock —
+		// a drag across further widths extends the freeze (#67 behavior).
+		w.resizeSince = w.now()
+		return
+	}
+	if !w.started {
+		return // no completed frame yet — nothing on screen to reclaim
+	}
+	// Would a reflow to the new width move the last completed frame?
+	reflowed := 0
+	for _, r := range w.lastRows {
+		reflowed += physicalRows(cellWidth(r), tw)
+	}
+	if reflowed != w.lastPhysRows {
 		w.resizeSince = w.now()
 		w.resizePending = true
 	}

@@ -1,7 +1,7 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (69 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (70 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
 
 **Status: build complete. All 6 phases green. Acceptance rounds 1–11 shipped
@@ -27,6 +27,17 @@ observed under repeated resizing). User-verified so far: window mode in
 place, flags on either side of HOST, bare-seconds interval/timeout, clean
 exit summary, the liveness animation, the window-mode resize fix, and the
 freeze/restart resize behavior (both views, incl. the `-` mark in plain).**
+Round 12 (DECISIONS #70, 2026-08-18): the #67 freeze is now CONDITIONAL in
+WINDOW mode — it fires only when the reflow would actually MOVE the block
+(any row of the last completed frame changes its physical row count at the
+new width). The user's window is ~55–60 cols (below the 79-cell floor;
+screenshot: AVG 3.92 wraps mid-value), and #67's unconditional trigger
+froze on EVERY resize there, stacking a whole frozen block per width
+change. Same-band resizes (60→55: 12 rows at both widths) now repaint IN
+PLACE — no artifact. Plain display UNCHANGED per user ("plain view is plain
+view"). The user's column-trim idea is PARKED (window mode may be rethought).
+Remaining gate: the user's real-terminal test of the same-band window
+repaint (built 2026-08-18, dist sha 466b95c0…).
 
 ---
 
@@ -94,16 +105,24 @@ and stage-marking; if in doubt, ASK, don't assume).
 | 64 | Terminal resize handled, platform-split: HOST elastic column (content-fit, terminal-capped, min 15 max 40, `…`), rune-based cell math, window re-measures every redraw, PHYSICAL-row cursor math (wrapped blocks stay coherent); Unix SIGWINCH fast path, Windows self-heals via the 1s tick | "Not handling terminal resize - breaks output" + "must be handled based on platform" |
 | 65 | Plain live line width-aware: same physical-row primitive reduced to one row — lastPhysRows + walk-back + defensive clear (live rewrite AND finalize); HOST stays fixed (scrollback consistency); piped/--no-live untouched; plain mode gains SIGWINCH fast path. Latent fix: stale-clear resets column (`\x1b[1B\r\x1b[K`) — cursor-down preserves the column, so non-blank last rows left stale text (window full-block case too) | "plain mode also needs to be width aware for the current live line only" + user's lastPhysRows design |
 | 66 | REFLOWING-terminal re-anchor via DSR/CPR (root fix for "creep up / does not clear the rest on wrap"): on width change, query the cursor (`\x1b[6n` → `\x1b[<r>;<c>R`, app-owned, key reader parses CSI, 150ms timeout, degrade on no-answer); cursor sits at the end of the re-wrapped line → recompute anchor. Discriminator: CPR row == bookkeeping expectation → no reflow → non-reflowing terminals byte-identical to #65. Both displays (plain live + window block — retires the #64 window creep too). x/term Windows MakeRaw sets ENABLE_VIRTUAL_TERMINAL_INPUT (verified) | "It can creep up and does not clear the rest on wrap" + option A chosen ("lets try your recommendation") |
+| 70 | Window-mode resize freeze is CONDITIONAL: freeze only when the reflow would move the block (any row of the last completed frame changes its physical row count at the new width — observeResize compares Σ physicalRows(lastRows, newW) vs lastPhysRows); same-band resizes repaint in place, no frozen block left behind. Pending freeze still restarts the settle clock on every further width change (drag behavior unchanged). PLAIN display untouched. User's column-trim idea parked (window mode may be rethought) | "This happens on resize window mode, making it less wider causes it" — user's ~55–60 col terminal stacked a frozen block per width change; #67 froze on every change even when the layout absorbed it (60→55 = 12 rows both widths; same-band lines cannot move in a reflow — the #68 safety reasoning generalized). Screenshot proved AVG 3.92 wrapping mid-value |
 
 ## 4. Pending / next actions
 
 - **User confirmed the plain-view resize fix on the real terminal (2026-08-18,
-  DECISIONS #69)** — freeze-and-restart reads well ("much nicer visual");
-  the last open user gate for the resize work is closed for plain mode.
-  No outstanding agent tasks.
-  If the user reports another acceptance issue: reproduce, fix, add regression test, re-run gates,
+  DECISIONS #69)** — freeze-and-restart reads well ("much nicer visual").
+- **Round 12 (#70) shipped and awaiting the user's real-terminal test**:
+  window-mode freeze is now conditional — same-band resizes (lines keep
+  their physical row count at both widths, so a reflow cannot move the
+  block) repaint in place; only wrap-boundary crossings freeze. User's
+  terminal is ~55–60 cols, so this directly targets their stacked-block
+  report. PLAIN display deliberately untouched. If the user reports another
+  acceptance issue: reproduce, fix, add regression test, re-run gates,
   rebuild `dist/` via `scripts/release.sh`, republish to the rig (§6), record
   DECISIONS + CHECKPOINT entries, commit.
+- **Column-trim idea PARKED** (user: "I may need to re-think window mode"):
+  dropping rightmost columns below the 79-cell floor was proposed 2026-08-18
+  but not built — do NOT implement without a go-ahead.
 - **HELD PLAN — reusable terminal test rig** (idea user-approved 2026-08-18,
   build explicitly on hold until user says go): full plan in §10.
 - **Animation is user-testing territory**: the rising-bar placement (col 47) and
@@ -157,7 +176,8 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `b3f266a4d8df…` (2026-08-18, round #68: resize mark + STATE/? under-80; served = dist, verified byte-identical over TLS).
+- Current published linux-amd64 sha: `466b95c0b20b…` (2026-08-18, round #70:
+  conditional window-mode freeze; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works
@@ -183,16 +203,26 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   `newTestWindowResizable`), render through `termScreen` (which now simulates
   DECAWM autowrap) and assert the visible grid at 120/81/60 cols — expansion,
   retraction, `…` truncation, below-floor wrap coherence, stale-row clearing.
+  Since #70 the resize tests are BAND-scoped: same-band changes (60→55,
+  60→50, drag 55→65→60) must repaint in place with exactly ONE block, and
+  band-crossing changes (60→73, 60→100) must freeze → restart on a fresh
+  row; the 120→79 retract/grow-back test asserts in-place repaint.
 - **Real-PTY resize proof**: `python3 scripts/pty-resize-probe.py` spawns the
   built binary in a pty and renders the capture through a VT emulator,
-  printing the visible screen + cursor-up/shrink-clear counts. The probe
-  acts as a minimal terminal: it ANSWERS DSR/CPR queries (`\x1b[6n`) from
-  its live emulator cursor, so the #66 re-anchor round-trip is tested
-  end-to-end in the real binary. Scenarios: `window` (60-col pty, mid-run
-  TIOCSWINSZ 60→100 via SIGWINCH — proves the block re-anchors and clears
-  stale rows) and `plain` (fixed 60-col pty — asserts the live line stays
-  anchored at row 2 across a multi-second run). Run it against a FRESH
-  build (`rm -f` the output first — stale-build trap).
+  printing the visible screen + raw-stream forensics (cursor-up counts,
+  restart CRLFs). Scenarios: `window` (60-col pty, mid-run TIOCSWINSZ 60→100
+  — proves the block FREEZES then restarts below the frozen rendering),
+  `window-same-band` (60→55 mid-run — proves the block repaints IN PLACE:
+  exactly one header, no frozen duplicate, #70), and `plain` (fixed 60-col
+  pty — asserts the live line stays anchored at row 2 across a multi-second
+  run). Run it against a FRESH build (`rm -f` the output first — stale-build
+  trap; the probe's binary path is hardcoded to /tmp/dohping-test).
+- **PASTE BLINDNESS (2026-08-18 lesson)**: the user's terminal (Windows
+  Terminal → WSL2) copies a WRAPPED line as one logical line — no newline at
+  the wrap point — so a pasted line of N cells does NOT prove it fit in N
+  columns. Never conclude "no wrap / no reflow" from a user's paste geometry;
+  the user's own screen is the evidence (they send screenshots now). Pastes
+  are weak evidence; the emulator tests and PTY probe are the proof.
 - Regression tests must accompany every acceptance fix (that's the established
   pattern, #50–66 all have them).
 

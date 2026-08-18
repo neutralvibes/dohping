@@ -602,55 +602,52 @@ func TestWindowResizeRetractsHostColumn(t *testing.T) {
 		t.Errorf("wide: status not at col %d: %q", statusCol(16), scr.line(1))
 	}
 
-	// Shrink to 79 (the minimum floor): settle, then the block restarts
-	// with HOST retracted to 15 and STATE at col 26 — no wrap at the
-	// minimum.
+	// Shrink to 79 (the minimum floor): same wrap band — the line fits in
+	// one row at both widths, so a reflow cannot move the block and it
+	// repaints IN PLACE with HOST retracted to 15 and STATE at col 26: no
+	// freeze, no frozen duplicate (DECISIONS #70 makes the freeze
+	// conditional on a wrap-boundary crossing).
 	*wPtr = 79
 	*now = now.Add(100 * time.Millisecond)
 	buf.Reset()
-	w.Tick() // frozen mid-settle
-	if buf.Len() != 0 {
-		t.Fatalf("mid-settle redraw produced output: %q", buf.String())
-	}
-	*now = now.Add(time.Second)
-	buf.Reset()
 	w.Tick()
+	repaint := buf.String()
+	if repaint == "" || strings.HasPrefix(repaint, "\r\n") {
+		t.Fatalf("same-band shrink must repaint in place (no freeze/restart): %q", repaint)
+	}
 	scr = newTermScreen(24, 79)
-	scr.feed(buf.String())
-	// The restart CRLF places the fresh block's header at row 1.
-	if !strings.HasPrefix(scr.line(1), "TIME") {
-		t.Errorf("narrow: restarted block header not at row 1: row1=%q", scr.line(1))
+	scr.feed(repaint)
+	if !strings.HasPrefix(scr.line(0), "TIME") {
+		t.Errorf("narrow: in-place header not at row 0: row0=%q", scr.line(0))
 	}
-	if runes := []rune(scr.line(2)); runes[statusCol(15)] != 'u' {
-		t.Errorf("narrow: status not at col %d: %q", statusCol(15), scr.line(2))
+	if runes := []rune(scr.line(1)); runes[statusCol(15)] != 'u' {
+		t.Errorf("narrow: status not at col %d: %q", statusCol(15), scr.line(1))
 	}
-	for r := 7; r < scr.rows; r++ {
+	for r := 6; r < scr.rows; r++ {
 		if got := scr.line(r); got != "" {
-			t.Errorf("narrow: row %d not blank (block should be 6 rows at min width): %q", r, got)
+			t.Errorf("narrow: row %d not blank (block is 6 rows at min width): %q", r, got)
 		}
 	}
 
-	// Grow back to 120: settle, then columns restore in the next
-	// restarted block.
+	// Grow back to 120: same band again — an in-place repaint restores
+	// the column layout (HOST 16, STATE at col 27), header still at row 0.
 	*wPtr = 120
 	*now = now.Add(100 * time.Millisecond)
 	buf.Reset()
 	w.Tick()
-	if buf.Len() != 0 {
-		t.Fatalf("mid-settle redraw produced output: %q", buf.String())
+	repaint = buf.String()
+	if repaint == "" || strings.HasPrefix(repaint, "\r\n") {
+		t.Fatalf("same-band grow-back must repaint in place: %q", repaint)
 	}
-	*now = now.Add(time.Second)
-	buf.Reset()
-	w.Tick()
 	scr = newTermScreen(24, 120)
-	scr.feed(buf.String())
-	if !strings.HasPrefix(scr.line(1), "TIME") {
-		t.Errorf("grow-back: restarted block header not at row 1: row1=%q", scr.line(1))
+	scr.feed(repaint)
+	if !strings.HasPrefix(scr.line(0), "TIME") {
+		t.Errorf("grow-back: in-place header not at row 0: row0=%q", scr.line(0))
 	}
-	if runes := []rune(scr.line(2)); runes[statusCol(16)] != 'u' {
-		t.Errorf("grow-back: status not at col %d: %q", statusCol(16), scr.line(2))
+	if runes := []rune(scr.line(1)); runes[statusCol(16)] != 'u' {
+		t.Errorf("grow-back: status not at col %d: %q", statusCol(16), scr.line(1))
 	}
-	for r := 7; r < scr.rows; r++ {
+	for r := 6; r < scr.rows; r++ {
 		if got := scr.line(r); got != "" {
 			t.Errorf("grow-back: row %d not blank: %q", r, got)
 		}
@@ -883,5 +880,160 @@ func TestWindowResizeDragKeepsFreezing(t *testing.T) {
 	}
 	if restartOut == "" {
 		t.Fatal("no restart emitted after the width settled")
+	}
+}
+
+// TestWindowResizeSameBandRepaintsInPlace: a width change that leaves every
+// line's physical row count unchanged (60 → 55: the block occupies 12 rows
+// at both widths) cannot move the block in a reflow, so it must repaint IN
+// PLACE — no freeze, no fresh-row restart, no frozen block left in
+// scrollback (DECISIONS #70). Regression for the user's window-mode resize
+// artifacts: resizing within the same wrap band stacked a whole frozen
+// block per change.
+func TestWindowResizeSameBandRepaintsInPlace(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	frame1 := buf.String()
+
+	*wPtr = 55
+	*now = now.Add(100 * time.Millisecond) // mid-settle time: must NOT matter
+	buf.Reset()
+	w.Tick()
+	repaint := buf.String()
+	if repaint == "" {
+		t.Fatal("same-band resize must repaint in place, not freeze")
+	}
+	if strings.HasPrefix(repaint, "\r\n") {
+		t.Fatalf("same-band resize must NOT restart on a fresh row: %q", repaint)
+	}
+
+	scr := newTermScreen(24, 60)
+	scr.feed(frame1)
+	scr.resize(55)
+	scr.feed(repaint)
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
+		}
+	}
+	if len(headers) != 1 {
+		t.Fatalf("same-band resize must keep exactly one block: header rows %v", headers)
+	}
+	if !strings.HasPrefix(scr.line(2), "11:00:35") {
+		t.Errorf("live line not at row 2 col 0 after same-band repaint: %q", scr.line(2))
+	}
+}
+
+// TestWindowResizeSameBandWrappedInPlace: the user's actual scenario —
+// terminal BELOW the column floor (both widths wrap every line), resized
+// within the same wrap band. Must repaint in place, wrapped and coherent,
+// with exactly one block (no frozen duplicate).
+func TestWindowResizeSameBandWrappedInPlace(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	frame1 := buf.String()
+
+	*wPtr = 50
+	buf.Reset()
+	w.Tick()
+	repaint := buf.String()
+	if repaint == "" || strings.HasPrefix(repaint, "\r\n") {
+		t.Fatalf("below-floor same-band resize must repaint in place: %q", repaint)
+	}
+
+	scr := newTermScreen(24, 60)
+	scr.feed(frame1)
+	scr.resize(50)
+	scr.feed(repaint)
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
+		}
+	}
+	if len(headers) != 1 {
+		t.Fatalf("wrapped same-band resize must keep exactly one block: header rows %v", headers)
+	}
+	if !strings.HasPrefix(scr.line(2), "11:00:35") {
+		t.Errorf("live line not at row 2 col 0 (wrapped header above): %q", scr.line(2))
+	}
+}
+
+// TestWindowResizeSameBandDragNoFreeze: a drag confined to one wrap band
+// repaints continuously — every step produces an in-place redraw and not
+// a single freeze/restart (the old unconditional behavior froze on every
+// step of the drag, stacking a block per width).
+func TestWindowResizeSameBandDragNoFreeze(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+
+	for _, width := range []int{55, 65, 60} {
+		*wPtr = width
+		*now = now.Add(100 * time.Millisecond)
+		buf.Reset()
+		w.Tick()
+		got := buf.String()
+		if got == "" || strings.HasPrefix(got, "\r\n") {
+			t.Fatalf("same-band drag step %d must repaint in place: %q", width, got)
+		}
+	}
+}
+
+// TestWindowResizeCrossesBandFreezes: the conditional freeze must still
+// fire when the wrap band changes WITHIN the normal width range (60 → 73:
+// 12 rows → 7 rows) — a reflow moves the block then, and reclaiming it
+// would corrupt the screen (the #67 contract, now band-scoped).
+func TestWindowResizeCrossesBandFreezes(t *testing.T) {
+	var buf bytes.Buffer
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
+	*wPtr = 60
+	w.Handle(changeEvent(t0, state.StatusUp))
+	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	frame1 := buf.String()
+
+	*wPtr = 73
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("band-crossing resize must freeze mid-settle: %q", buf.String())
+	}
+	*now = now.Add(time.Second)
+	buf.Reset()
+	w.Tick()
+	restart := buf.String()
+	if !strings.HasPrefix(restart, "\r\n") {
+		t.Fatalf("band-crossing restart must begin with CRLF: %q", restart)
+	}
+
+	scr := newTermScreen(24, 60)
+	scr.feed(frame1)
+	scr.resize(73)
+	scr.feed(restart)
+	rows := screenRows(scr)
+	var headers []int
+	for r, ln := range rows {
+		if strings.HasPrefix(ln, "TIME") {
+			headers = append(headers, r)
+		}
+	}
+	if len(headers) != 2 || headers[1] <= headers[0] {
+		t.Fatalf("band-crossing resize must leave frozen block + fresh block below: header rows %v", headers)
 	}
 }
