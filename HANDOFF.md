@@ -1,7 +1,7 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (71 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (73 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
 
 **Status: build complete. All 6 phases green. Acceptance rounds 1–11 shipped
@@ -59,6 +59,16 @@ wrap by design; (c) RTT ≥ 10,000 ms overflows the 7-cell RTT fields
 (verified: "10000.00" = 8 cells) and widens the line. Docs-only; optional
 future mitigations (RTT clamp, big-jump conservative freeze) recorded but
 NOT built. dist sha 5d79fd9b….
+Round 15 (DECISIONS #73, 2026-08-18): SAME-BAND REPAINTS ARE DEFERRED — a
+new deferPending state waits out the 300ms settle after ANY width change
+before the in-place repaint (each further change restarts the clock);
+nothing is written mid-reflow, and no event-timed redraw can land on a
+canvas that is still moving (the user's "when it wraps it creates another
+area to write to" — an event redraw lands a row off, the block shifts and
+claims the new row). Same-band blocks never restart and leave no frozen
+artifact. Finalize forces the render. README note updated (the residual
+ConPTY cursor-placement race after the reflow settles remains the
+documented floor). dist sha 44c82b29….
 
 ---
 
@@ -146,10 +156,14 @@ and stage-marking; if in doubt, ASK, don't assume).
   as a lived-with limitation with a README note (resizing terminals can
   fracture output; mechanisms documented: reflowing-terminal drag race,
   sub-46 wrap by design, RTT ≥ 10,000 ms column overflow). PLAIN display
-  deliberately untouched. If the user reports another acceptance issue:
-  reproduce, fix, add regression test, re-run gates, rebuild `dist/` via
-  `scripts/release.sh`, republish to the rig (§6), record DECISIONS +
-  CHECKPOINT entries, commit.
+  deliberately untouched. **Round 15 (#73) then addressed the fracture
+  trigger: same-band repaints are DEFERRED for the 300ms settle after ANY
+  width change (no writes mid-reflow; the user's "when it wraps it creates
+  another area to write to" — an event redraw lands a row off mid-reflow),
+  shipped 2026-08-18, dist sha 44c82b29…, awaiting the user's test.** If
+  the user reports another acceptance issue: reproduce, fix, add regression
+  test, re-run gates, rebuild `dist/` via `scripts/release.sh`, republish
+  to the rig (§6), record DECISIONS + CHECKPOINT entries, commit.
 - **HELD PLAN — reusable terminal test rig** (idea user-approved 2026-08-18,
   build explicitly on hold until user says go): full plan in §10.
 - **Animation is user-testing territory**: the rising-bar placement (col 47) and
@@ -203,8 +217,8 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `5d79fd9b7f09…` (2026-08-18, round #71:
-  window-mode column trim; served = dist, verified byte-identical over TLS).
+- Current published linux-amd64 sha: `44c82b29df42…` (2026-08-18, round #73:
+  deferred same-band repaints; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works

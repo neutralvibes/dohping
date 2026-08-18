@@ -140,12 +140,14 @@ own freeze treatment (see above).
 
 **A note on resizing — resizing terminals can cause output to fracture.**
 On reflowing terminals (Windows Terminal, Terminal.app, iTerm2) a resize
-re-wraps the whole screen in ways the program cannot observe, so a window
-block may briefly show wrapped or duplicated rows while it self-corrects
-on the next repaint (within a second, or immediately on Unix via
-SIGWINCH). Below ~46 columns even the essentials (TIME/HOST/STATE/DURATION)
-cannot fit and the lines wrap — coherently, but wrapped. Hosts with
-RTT ≥ 10,000 ms overflow their RTT columns and widen the line.
+re-wraps the whole screen in ways the program cannot observe. The window
+block defers its redraws until the width has been stable (300 ms) and
+never writes mid-reflow, but the terminal's own reflow can still leave the
+block briefly offset by a row (ConPTY's cursor placement is unreliable on
+resize); it self-corrects on the next repaint. Below ~46 columns even the
+essentials (TIME/HOST/STATE/DURATION) cannot fit and the lines wrap —
+coherently, but wrapped. Hosts with RTT ≥ 10,000 ms overflow their RTT
+columns and widen the line.
 
 ## Logging
 

@@ -603,17 +603,23 @@ func TestWindowResizeRetractsHostColumn(t *testing.T) {
 	}
 
 	// Shrink to 79 (the minimum floor): same wrap band — the line fits in
-	// one row at both widths, so a reflow cannot move the block and it
-	// repaints IN PLACE with HOST retracted to 15 and STATE at col 26: no
-	// freeze, no frozen duplicate (DECISIONS #70 makes the freeze
-	// conditional on a wrap-boundary crossing).
+	// one row at both widths, so a reflow cannot move the block. The
+	// repaint is DEFERRED until the width settles (no writes mid-reflow,
+	// DECISIONS #73), then happens IN PLACE with HOST retracted to 15 and
+	// STATE at col 26: no freeze, no frozen duplicate.
 	*wPtr = 79
 	*now = now.Add(100 * time.Millisecond)
 	buf.Reset()
 	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("same-band shrink must defer the repaint mid-reflow: %q", buf.String())
+	}
+	*now = now.Add(300 * time.Millisecond)
+	buf.Reset()
+	w.Tick()
 	repaint := buf.String()
 	if repaint == "" || strings.HasPrefix(repaint, "\r\n") {
-		t.Fatalf("same-band shrink must repaint in place (no freeze/restart): %q", repaint)
+		t.Fatalf("settled same-band shrink must repaint in place (no freeze/restart): %q", repaint)
 	}
 	scr = newTermScreen(24, 79)
 	scr.feed(repaint)
@@ -629,15 +635,22 @@ func TestWindowResizeRetractsHostColumn(t *testing.T) {
 		}
 	}
 
-	// Grow back to 120: same band again — an in-place repaint restores
-	// the column layout (HOST 16, STATE at col 27), header still at row 0.
+	// Grow back to 120: same band again — a deferred in-place repaint
+	// restores the column layout (HOST 16, STATE at col 27), header still
+	// at row 0.
 	*wPtr = 120
 	*now = now.Add(100 * time.Millisecond)
 	buf.Reset()
 	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("same-band grow-back must defer the repaint mid-reflow: %q", buf.String())
+	}
+	*now = now.Add(300 * time.Millisecond)
+	buf.Reset()
+	w.Tick()
 	repaint = buf.String()
 	if repaint == "" || strings.HasPrefix(repaint, "\r\n") {
-		t.Fatalf("same-band grow-back must repaint in place: %q", repaint)
+		t.Fatalf("settled same-band grow-back must repaint in place: %q", repaint)
 	}
 	scr = newTermScreen(24, 120)
 	scr.feed(repaint)
@@ -889,9 +902,10 @@ func TestWindowResizeDragKeepsFreezing(t *testing.T) {
 // TestWindowResizeSameBandRepaintsInPlace: a width change that leaves every
 // line's physical row count unchanged (60 → 55: with column trimming the
 // line fits in one row at both widths — DECISIONS #71) cannot move the
-// block in a reflow, so it must repaint IN PLACE — no freeze, no fresh-row
-// restart, no frozen block left in scrollback (DECISIONS #70). Regression
-// for the user's window-mode resize artifacts.
+// block in a reflow, so it must repaint IN PLACE — but DEFERRED until the
+// width settles (no writes mid-reflow, DECISIONS #73): nothing at 100ms,
+// an in-place repaint after the settle — no freeze, no fresh-row restart,
+// no frozen block left in scrollback (DECISIONS #70).
 func TestWindowResizeSameBandRepaintsInPlace(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
@@ -902,12 +916,18 @@ func TestWindowResizeSameBandRepaintsInPlace(t *testing.T) {
 	frame1 := buf.String()
 
 	*wPtr = 55
-	*now = now.Add(100 * time.Millisecond) // mid-settle time: must NOT matter
+	*now = now.Add(100 * time.Millisecond) // mid-reflow: no writes yet
+	buf.Reset()
+	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("same-band resize must defer the repaint until the width settles: %q", buf.String())
+	}
+	*now = now.Add(300 * time.Millisecond) // width stable: repaint in place
 	buf.Reset()
 	w.Tick()
 	repaint := buf.String()
 	if repaint == "" {
-		t.Fatal("same-band resize must repaint in place, not freeze")
+		t.Fatal("settled same-band resize must repaint in place")
 	}
 	if strings.HasPrefix(repaint, "\r\n") {
 		t.Fatalf("same-band resize must NOT restart on a fresh row: %q", repaint)
@@ -935,11 +955,12 @@ func TestWindowResizeSameBandRepaintsInPlace(t *testing.T) {
 // TestWindowResizeSameBandWrappedInPlace: terminal BELOW the essentials
 // floor (the live line wraps at both widths — 46 cells with its animation
 // frame vs 40/45 cols; the header fits at 40+), resized within the same
-// wrap band. Must repaint in place, wrapped and coherent, with exactly one
-// block (no frozen duplicate).
+// wrap band. Must defer through the settle (no writes mid-reflow, #73)
+// then repaint in place, wrapped and coherent, with exactly one block (no
+// frozen duplicate).
 func TestWindowResizeSameBandWrappedInPlace(t *testing.T) {
 	var buf bytes.Buffer
-	w, wPtr, _, _ := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
+	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
 	*wPtr = 40
 	w.Handle(changeEvent(t0, state.StatusUp))
 	w.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
@@ -947,6 +968,12 @@ func TestWindowResizeSameBandWrappedInPlace(t *testing.T) {
 	frame1 := buf.String()
 
 	*wPtr = 45
+	buf.Reset()
+	w.Tick()
+	if buf.Len() != 0 {
+		t.Fatalf("below-floor same-band resize must defer until the width settles: %q", buf.String())
+	}
+	*now = now.Add(300 * time.Millisecond)
 	buf.Reset()
 	w.Tick()
 	repaint := buf.String()
@@ -974,9 +1001,10 @@ func TestWindowResizeSameBandWrappedInPlace(t *testing.T) {
 }
 
 // TestWindowResizeSameBandDragNoFreeze: a drag confined to one wrap band
-// repaints continuously — every step produces an in-place redraw and not
-// a single freeze/restart (the old unconditional behavior froze on every
-// step of the drag, stacking a block per width).
+// defers every step (no writes mid-reflow, DECISIONS #73) and repaints in
+// place exactly once after the width settles — no restart, no frozen
+// block (the old unconditional behavior froze on every step of the drag,
+// stacking a block per width).
 func TestWindowResizeSameBandDragNoFreeze(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
@@ -990,10 +1018,16 @@ func TestWindowResizeSameBandDragNoFreeze(t *testing.T) {
 		*now = now.Add(100 * time.Millisecond)
 		buf.Reset()
 		w.Tick()
-		got := buf.String()
-		if got == "" || strings.HasPrefix(got, "\r\n") {
-			t.Fatalf("same-band drag step %d must repaint in place: %q", width, got)
+		if got := buf.String(); got != "" {
+			t.Fatalf("drag step %d must be deferred (no writes mid-reflow): %q", width, got)
 		}
+	}
+	*now = now.Add(300 * time.Millisecond)
+	buf.Reset()
+	w.Tick()
+	got := buf.String()
+	if got == "" || strings.HasPrefix(got, "\r\n") {
+		t.Fatalf("settled drag must repaint in place exactly once: %q", got)
 	}
 }
 
