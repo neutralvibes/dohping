@@ -349,6 +349,13 @@ The repo is destined for GitHub. Two layers keep the internal build docs out:
   and opens a PR; the USER approves the merge to main. First publish will
   need the repo URL + token from the user; token must include `workflow`
   scope when the §10 CI workflow (which pushes .github/workflows) ships.
+- **GitHub side (set by user 2026-08-18):** fine-grained token scoped to the
+  dohping repo only (contents write, PRs read/write, issues read, actions
+  read) + branch protection on `main`: require PR + 1 approval, block
+  force-pushes, and *do not fail branches at creation* — no CI workflow
+  exists yet, so no required checks until one has run. When the §10 CI
+  workflow ships: run it once on a branch, THEN add its checks as required
+  status checks (requiring a never-run check deadlocks every PR).
 - **README is the only public doc.** It must never reference build-docs/
   files (scrubbed 2026-08-18; development section now points at release.sh +
   pty-resize-probe.py).
