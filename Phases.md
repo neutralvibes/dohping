@@ -453,7 +453,7 @@ Command:
 
 Expected header:
 
-    TIME      HOST            STATUS  DURATION       MIN     MAX     AVG     FAILS
+    TIME      HOST            STATE DURATION       MIN     MAX     AVG     FAILS
 
 #### 2. `--no-header` suppresses header
 

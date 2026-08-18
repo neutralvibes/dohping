@@ -218,7 +218,7 @@ func TestErrorProbeUpdatesLiveLine(t *testing.T) {
 	if got := strings.Count(out, "\n"); got != 3 {
 		t.Errorf("newlines after finalize = %d, want 3 (header + up + error): %q", got, out)
 	}
-	if !strings.Contains(out, "error   0d 00:01:00") {
+	if !strings.Contains(out, "error 0d 00:01:00") {
 		t.Errorf("error line missing final duration: %q", out)
 	}
 }
@@ -236,7 +236,7 @@ func TestErrorProbeLiveDurationUpdate(t *testing.T) {
 	out := buf.String()
 	// The final redraw shows the advancing duration (5s).
 	last := out[strings.LastIndex(out, "\r")+1:]
-	if !strings.Contains(last, "error   0d 00:00:05") {
+	if !strings.Contains(last, "error 0d 00:00:05") {
 		t.Errorf("live error duration not updated to 5s: %q", last)
 	}
 	// The error line is redrawn in place, never finalized/appended: every
@@ -286,14 +286,15 @@ func TestLiveLineShowsAnimationFrame(t *testing.T) {
 	if !strings.ContainsAny(scr.line(2), frames) {
 		t.Errorf("live line missing animation frame: %q", scr.line(2))
 	}
-	// The frame lives at column 47 (inside the DURATION padding), and the
-	// separator at column 48 stays a space so it doesn't touch MIN.
-	if runes := []rune(scr.line(2)); len(runes) > 48 {
-		if c := runes[47]; !strings.ContainsRune(frames, c) {
-			t.Errorf("live frame not at column 47 (got %q): %q", c, scr.line(2))
+	// The frame lives at column 45 (inside the DURATION padding at the
+	// HOST-15 minimum), and the separator at column 46 stays a space so
+	// it doesn't touch MIN.
+	if runes := []rune(scr.line(2)); len(runes) > 46 {
+		if c := runes[45]; !strings.ContainsRune(frames, c) {
+			t.Errorf("live frame not at column 45 (got %q): %q", c, scr.line(2))
 		}
-		if c := runes[48]; c != ' ' {
-			t.Errorf("separator at col 48 = %q, want space: %q", c, scr.line(2))
+		if c := runes[46]; c != ' ' {
+			t.Errorf("separator at col 46 = %q, want space: %q", c, scr.line(2))
 		}
 	}
 }
@@ -489,6 +490,9 @@ func TestDisplayResizeFreezeThenRestart(t *testing.T) {
 	if !strings.HasPrefix(restart, "\r\n") {
 		t.Errorf("restart must begin with CRLF to move below the frozen line: %q", restart)
 	}
+	if strings.Contains(restart, "\x1b[1A\r-") {
+		t.Errorf("wrapped-line settle must NOT mark the frozen row (geometry unsafe): %q", restart)
+	}
 
 	scr := newTermScreen(24, 60)
 	scr.feed(frame1)
@@ -502,6 +506,56 @@ func TestDisplayResizeFreezeThenRestart(t *testing.T) {
 		t.Errorf("fresh live line not at row 4: row4=%q", scr.line(4))
 	}
 	for r := 5; r < scr.rows; r++ {
+		if got := scr.line(r); got != "" {
+			t.Errorf("row %d not blank below the fresh line: %q", r, got)
+		}
+	}
+}
+
+// TestDisplayResizeSettleMarksFrozenRow: when the frozen line is provably
+// a single row (the live line was one row before AND after the resize),
+// the settle marks it with '-' so the scrollback shows a resize artifact
+// instead of a duplicate-looking data row (DECISIONS #68). The geometry
+// is safe on reflowing and non-reflowing terminals alike: a line that
+// fits at both widths cannot re-wrap, so the frozen row is exactly the
+// one directly above the fresh line.
+func TestDisplayResizeSettleMarksFrozenRow(t *testing.T) {
+	var buf bytes.Buffer
+	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 120, 24)
+	*wPtr = 120
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0)) // 46 cells: 1 row at both widths
+	frame1 := buf.String()
+
+	*wPtr = 100
+	*now = now.Add(100 * time.Millisecond)
+	buf.Reset()
+	d.Tick() // frozen mid-settle
+	if buf.Len() != 0 {
+		t.Fatalf("mid-settle write produced output: %q", buf.String())
+	}
+	*now = now.Add(time.Second)
+	buf.Reset()
+	d.Tick()
+	restart := buf.String()
+	if !strings.Contains(restart, "\x1b[1A\r-\x1b[K\x1b[1B\r") {
+		t.Errorf("settle must mark the frozen row with '-': %q", restart)
+	}
+
+	scr := newTermScreen(24, 120)
+	scr.feed(frame1)
+	scr.resize(100)
+	scr.feed(restart)
+	// The frozen row above the fresh line is now just '-'; the fresh line
+	// is directly below it.
+	if got := scr.line(1); got != "-" {
+		t.Errorf("frozen row = %q, want just '-' (TIME cleared)", got)
+	}
+	if !strings.HasPrefix(scr.line(2), "11:00:35") {
+		t.Errorf("fresh live line not at row 2: row2=%q", scr.line(2))
+	}
+	for r := 3; r < scr.rows; r++ {
 		if got := scr.line(r); got != "" {
 			t.Errorf("row %d not blank below the fresh line: %q", r, got)
 		}

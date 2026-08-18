@@ -242,10 +242,10 @@ When finalized, the line should be preserved as historical output.
 ### 7.4 Plain Line Mode Example
 
 ```text
-TIME      HOST            STATUS  DURATION       MIN     MAX     AVG     FAILS
-11:00:35  192.168.1.23    up      0d 00:35:26    1.70    5.90    2.70
-11:05:23  192.168.1.23    down    0d 00:01:05                                23
-13:34:11  192.168.1.23    up      2d 00:45:26    1.00    2.50    1.70
+TIME      HOST            STATE DURATION       MIN     MAX     AVG     FAILS
+11:00:35  192.168.1.23    up    0d 00:35:26    1.70    5.90    2.70
+11:05:23  192.168.1.23    down  0d 00:01:05                                23
+13:34:11  192.168.1.23    up    2d 00:45:26    1.00    2.50    1.70
 ```
 
 Only the last line is live-updated.
@@ -352,12 +352,12 @@ If `--window` is specified and stdout is redirected or piped, `dohping` should f
 With `--window-lines 5`:
 
 ```text
-TIME      HOST            STATUS  DURATION       MIN     MAX     AVG     FAILS
-11:05:23  192.168.1.23    down    0d 00:01:05                                23
-13:34:11  192.168.1.23    up      2d 00:45:26    1.00    2.50    1.70
-15:02:44  192.168.1.23    down    0d 00:00:03                                 1
-15:02:58  192.168.1.23    up      0d 00:00:07    0.98    1.12    1.05
-15:03:10  192.168.1.23    up      0d 00:00:19    0.98    1.30    1.11
+TIME      HOST            STATE DURATION       MIN     MAX     AVG     FAILS
+11:05:23  192.168.1.23    down  0d 00:01:05                                23
+13:34:11  192.168.1.23    up    2d 00:45:26    1.00    2.50    1.70
+15:02:44  192.168.1.23    down  0d 00:00:03                                 1
+15:02:58  192.168.1.23    up    0d 00:00:07    0.98    1.12    1.05
+15:03:10  192.168.1.23    up    0d 00:00:19    0.98    1.30    1.11
 ```
 
 When another status line appears, the oldest visible line is removed.
@@ -367,7 +367,7 @@ When another status line appears, the oldest visible line is removed.
 The preferred column set is:
 
 ```text
-TIME HOST STATUS DURATION MIN MAX AVG FAILS
+TIME HOST STATE DURATION MIN MAX AVG FAILS
 ```
 
 ### 9.1 Column Definitions
@@ -376,7 +376,7 @@ TIME HOST STATUS DURATION MIN MAX AVG FAILS
 |---|---|
 | `TIME` | Time when the current status began |
 | `HOST` | Target host or address |
-| `STATUS` | Current status: `up`, `down`, `unknown`, or `error` |
+| `STATE` | Current state: `up`, `down`, `?` (not yet established), or `error` |
 | `DURATION` | Time spent in the current status |
 | `MIN` | Minimum RTT in milliseconds during current status |
 | `MAX` | Maximum RTT in milliseconds during current status |

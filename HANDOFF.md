@@ -1,11 +1,11 @@
 # dohping — State of Play (handoff for a new chat)
 
 Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
-(the contract), `DECISIONS.md` (67 entries — each fix's rationale), `CHECKPOINT.md`
+(the contract), `DECISIONS.md` (68 entries — each fix's rationale), `CHECKPOINT.md`
 (gate status), `PROGRESS.md` (timeline). `README.md` is the user-facing doc.
 
-**Status: build complete. All 6 phases green. Acceptance rounds 1–9 shipped
-(DECISIONS #50–67, 2026-08-17/18). Round 8's CPR re-anchor (#66) FAILED the
+**Status: build complete. All 6 phases green. Acceptance rounds 1–10 shipped
+(DECISIONS #50–68, 2026-08-17/18). Round 8's CPR re-anchor (#66) FAILED the
 user's real-terminal test ("still not working") and was replaced in round 9
 (#67) by freeze-and-restart: on a width change the displays pause in-place
 updates until the width is stable (300ms, restarted by every further change),
@@ -13,11 +13,16 @@ then continue on a fresh row below the frozen re-wrapped rendering — the old
 rendering stays in scrollback as history. Root cause of the #66 failure:
 the user's terminal is Windows Terminal → WSL2 → Debian, and the DSR/CPR
 answer comes from ConPTY, whose reflow differs from the rendered view
-(microsoft/terminal#18725 — "wildly incorrect cursor positions"). #67 is
-position-independent and fully sandbox-tested; the user's own terminal test
-is the remaining gate. User-verified so far: window mode in place, flags on
-either side of HOST, bare-seconds interval/timeout, clean exit summary, the
-liveness animation, and the window-mode resize fix.**
+(microsoft/terminal#18725 — "wildly incorrect cursor positions"). Round 10
+(#68) confirmed working on the user's screen ("It is doing it") and added:
+the frozen row is marked with a single `-` (safe only when the line was one
+row before and after the resize), and STATUS → STATE with `?` for the
+never-established status — the minimum line dropped from 81 to 79 cells,
+under 80. #67/#68 are position-independent and fully sandbox-tested; the
+user's own terminal test is the remaining gate. User-verified so far:
+window mode in place, flags on either side of HOST, bare-seconds
+interval/timeout, clean exit summary, the liveness animation, the
+window-mode resize fix, and the freeze/restart resize behavior.**
 
 ---
 
@@ -49,7 +54,8 @@ and stage-marking; if in doubt, ASK, don't assume).
 - **Exit summary is a clean left-aligned block** at column 0 even on terminals
   without ONLCR — explicit `\r` per line, `\r\n` terminators (#56).
 - **Liveness animation**: live line shows a rising bar `▁▃▅▇` in the DURATION
-  field's padding (column 47, floats between DURATION and MIN). Advances on a
+  field's padding (column 45 at the HOST-15 minimum, floats between DURATION
+  and MIN). Advances on a
   fixed 1-SECOND timer independent of probe cadence, and the tick ALSO refreshes
   DURATION from the wall clock (#59–61). Finalized/history/piped lines stay
   plain (spec §7.4 byte-identical). Verified in PTY capture at `-i 5`.
@@ -142,7 +148,7 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `fc2b8b1ee320…` (2026-08-18, freeze/restart round #67; served = dist, verified byte-identical over TLS).
+- Current published linux-amd64 sha: `b3f266a4d8df…` (2026-08-18, round #68: resize mark + STATE/? under-80; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works

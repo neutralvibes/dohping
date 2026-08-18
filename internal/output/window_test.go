@@ -208,7 +208,7 @@ func TestWindowRenderedScreenClean(t *testing.T) {
 	scr.feed(buf.String())
 
 	// Row 0 must be exactly the header starting at column 0.
-	if got := scr.line(0); got != "TIME      HOST            STATUS  DURATION       MIN     MAX     AVG     FAILS" {
+	if got := scr.line(0); got != "TIME      HOST            STATE DURATION       MIN     MAX     AVG     FAILS" {
 		t.Errorf("row 0 = %q, want clean header at column 0", got)
 	}
 	// Row 1 must be the live line, starting at column 0 (time at col 0).
@@ -478,14 +478,14 @@ func TestWindowLiveRowAnimatedHistoryStatic(t *testing.T) {
 	if !strings.ContainsAny(scr.line(2), frames) {
 		t.Errorf("live row missing animation frame: %q", scr.line(2))
 	}
-	// The frame lives at column 47 (inside the DURATION padding) and the
-	// separator at 48 stays a space — MIN keeps its column.
-	if runes := []rune(scr.line(2)); len(runes) > 48 {
-		if c := runes[47]; !strings.ContainsRune(frames, c) {
-			t.Errorf("live frame not at column 47 (got %q): %q", c, scr.line(2))
+	// The frame lives at column 45 (inside the DURATION padding) and the
+	// separator at 46 stays a space — MIN keeps its column.
+	if runes := []rune(scr.line(2)); len(runes) > 46 {
+		if c := runes[45]; !strings.ContainsRune(frames, c) {
+			t.Errorf("live frame not at column 45 (got %q): %q", c, scr.line(2))
 		}
-		if c := runes[48]; c != ' ' {
-			t.Errorf("separator at col 48 = %q, want space: %q", c, scr.line(2))
+		if c := runes[46]; c != ' ' {
+			t.Errorf("separator at col 46 = %q, want space: %q", c, scr.line(2))
 		}
 	}
 	// Tick advances the frame: another tick changes the glyph.
@@ -602,10 +602,10 @@ func TestWindowResizeRetractsHostColumn(t *testing.T) {
 		t.Errorf("wide: status not at col %d: %q", statusCol(16), scr.line(1))
 	}
 
-	// Shrink to 81 (the minimum floor): settle, then the block restarts
-	// with HOST retracted to 15 and STATUS at col 26 — no wrap at the
+	// Shrink to 79 (the minimum floor): settle, then the block restarts
+	// with HOST retracted to 15 and STATE at col 26 — no wrap at the
 	// minimum.
-	*wPtr = 81
+	*wPtr = 79
 	*now = now.Add(100 * time.Millisecond)
 	buf.Reset()
 	w.Tick() // frozen mid-settle
@@ -615,7 +615,7 @@ func TestWindowResizeRetractsHostColumn(t *testing.T) {
 	*now = now.Add(time.Second)
 	buf.Reset()
 	w.Tick()
-	scr = newTermScreen(24, 81)
+	scr = newTermScreen(24, 79)
 	scr.feed(buf.String())
 	// The restart CRLF places the fresh block's header at row 1.
 	if !strings.HasPrefix(scr.line(1), "TIME") {
@@ -657,16 +657,16 @@ func TestWindowResizeRetractsHostColumn(t *testing.T) {
 	}
 }
 
-// TestWindowResizeMinWidthTruncatesHost: at the 81-cell minimum the HOST
+// TestWindowResizeMinWidthTruncatesHost: at the 79-cell minimum the HOST
 // column is 15 cells and a long host shows the ellipsis; the truncation is
-// cell-exact (rune-based, DECISIONS #64) so STATUS stays at col 26.
+// cell-exact (rune-based, DECISIONS #64) so STATE stays at col 26.
 func TestWindowResizeMinWidthTruncatesHost(t *testing.T) {
 	var buf bytes.Buffer
-	w := newTestWindowSized(&buf, 5, false, false, 81, 24)
+	w := newTestWindowSized(&buf, 5, false, false, 79, 24)
 	w.layout = NewLayout("a-very-long-hostname.internal", "HH:MM:SS", nil) // 29 cells
 	w.Handle(changeEvent(t0, state.StatusUp))
 
-	scr := newTermScreen(24, 81)
+	scr := newTermScreen(24, 79)
 	scr.feed(buf.String())
 	row := scr.line(1)
 	if !strings.Contains(row, "…") {
@@ -686,7 +686,7 @@ func TestWindowResizeMinWidthTruncatesHost(t *testing.T) {
 }
 
 // TestWindowResizeBelowFloorWrapsCoherently is the regression test for the
-// reported bug: a terminal narrower than the 81-cell minimum wraps every
+// reported bug: a terminal narrower than the 79-cell minimum wraps every
 // line, and the block must repaint as a coherent stack — one header, one
 // live line, no interleaved fragments — even across repeated redraws.
 // The old code counted LOGICAL rows for cursor movement, so a wrapped

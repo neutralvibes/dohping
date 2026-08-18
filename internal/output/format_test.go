@@ -20,7 +20,7 @@ func buildStats(min, max, avg time.Duration, count int) state.Stats {
 
 func TestHeaderGolden(t *testing.T) {
 	got := plainLayout("192.168.1.23").Header()
-	want := "TIME      HOST            STATUS  DURATION       MIN     MAX     AVG     FAILS"
+	want := "TIME      HOST            STATE DURATION       MIN     MAX     AVG     FAILS"
 	if got != want {
 		t.Errorf("header mismatch:\n got: %q\nwant: %q", got, want)
 	}
@@ -37,10 +37,13 @@ func TestUpLineGolden(t *testing.T) {
 		Stats:    buildStats(1700*time.Microsecond, 5900*time.Microsecond, 2700*time.Microsecond, 3),
 	}
 	got := plainLayout("192.168.1.23").FormatLine(ln)
-	// Column-starts (0-based): TIME@0 HOST@10 STATUS@26 DURATION@34 MIN@49 MAX@57 AVG@65 FAILS@73.
+	// Column-starts (0-based, DECISIONS #68): TIME@0 HOST@10 STATE@26
+	// DURATION@32 MIN@47 MAX@55 AVG@63 FAILS@71.
 	// Values are left-aligned in their fields, starting directly under the
 	// header labels — this line is byte-identical to the spec §7.4 example.
-	want := "11:00:35  192.168.1.23    up      0d 00:35:26    1.70    5.90    2.70"
+	want := "11:00:35  192.168.1.23    up" + strings.Repeat(" ", 4) + "0d 00:35:26" +
+		strings.Repeat(" ", 4) + "1.70" + strings.Repeat(" ", 4) + "5.90" +
+		strings.Repeat(" ", 4) + "2.70"
 	if got != want {
 		t.Errorf("up line mismatch:\n got: %q\nwant: %q", got, want)
 	}
@@ -49,7 +52,7 @@ func TestUpLineGolden(t *testing.T) {
 		s string
 		i int
 	}{
-		{"1.70", 49}, {"5.90", 57}, {"2.70", 65},
+		{"1.70", 47}, {"5.90", 55}, {"2.70", 63},
 	} {
 		if !strings.HasPrefix(got[col.i:], col.s) {
 			t.Errorf("column %q not at %d in %q", col.s, col.i, got)
@@ -65,13 +68,13 @@ func TestDownLineGolden(t *testing.T) {
 		Fails:    23,
 	}
 	got := plainLayout("192.168.1.23").FormatLine(ln)
-	// FAILS left-aligned under its header at column 73.
-	want := "11:05:23  192.168.1.23    down    0d 00:01:05" + strings.Repeat(" ", 28) + "23"
+	// FAILS left-aligned under its header at column 71.
+	want := "11:05:23  192.168.1.23    down" + strings.Repeat(" ", 2) + "0d 00:01:05" + strings.Repeat(" ", 28) + "23"
 	if got != want {
 		t.Errorf("down line mismatch:\n got: %q\nwant: %q", got, want)
 	}
-	if !strings.HasPrefix(got[73:], "23") {
-		t.Errorf("FAILS value not aligned at column 73: %q", got)
+	if !strings.HasPrefix(got[71:], "23") {
+		t.Errorf("FAILS value not aligned at column 71: %q", got)
 	}
 }
 
@@ -82,29 +85,36 @@ func TestErrorLineGolden(t *testing.T) {
 		Duration: 3 * time.Second,
 	}
 	got := plainLayout("192.168.1.23").FormatLine(ln)
-	want := "13:00:00  192.168.1.23    error   0d 00:00:03"
+	want := "13:00:00  192.168.1.23    error 0d 00:00:03"
 	if got != want {
 		t.Errorf("error line mismatch:\n got: %q\nwant: %q", got, want)
 	}
 }
 
 func TestUnknownLineGolden(t *testing.T) {
+	// The never-established status renders as "?" in the table (DECISIONS
+	// #68): it must fit the 5-cell STATE field so the line stays 79 wide.
+	// The word "unknown" survives in prose contexts (the exit summary).
 	ln := Line{
 		Time:     t0,
 		Status:   state.StatusUnknown,
 		Duration: 1 * time.Second,
 	}
-	got := plainLayout("192.168.1.23").FormatLine(ln)
-	want := "11:00:35  192.168.1.23    unknown 0d 00:00:01"
+	layout := plainLayout("192.168.1.23")
+	got := layout.FormatLine(ln)
+	want := "11:00:35  192.168.1.23    ?" + strings.Repeat(" ", 5) + "0d 00:00:01"
 	if got != want {
 		t.Errorf("unknown line mismatch:\n got: %q\nwant: %q", got, want)
+	}
+	if layout.FullWidth() != 79 {
+		t.Errorf("FullWidth = %d, want 79 (under 80)", layout.FullWidth())
 	}
 }
 
 func TestHostWidthMin15(t *testing.T) {
 	// A short host still gets the 15-char column (header parity).
 	got := plainLayout("a").Header()
-	want := "TIME      HOST            STATUS  DURATION       MIN     MAX     AVG     FAILS"
+	want := "TIME      HOST            STATE DURATION       MIN     MAX     AVG     FAILS"
 	if got != want {
 		t.Errorf("min-width header mismatch:\n got: %q\nwant: %q", got, want)
 	}
@@ -113,7 +123,7 @@ func TestHostWidthMin15(t *testing.T) {
 	// "a" in a 15-wide field + 1 sep → 15 spaces before "up"; RTT values
 	// left-aligned under their headers.
 	want = "11:00:35  a" + strings.Repeat(" ", 15) + "up" +
-		strings.Repeat(" ", 6) + "0d 00:00:01" +
+		strings.Repeat(" ", 4) + "0d 00:00:01" +
 		strings.Repeat(" ", 4) + "1.00" +
 		strings.Repeat(" ", 4) + "1.00" +
 		strings.Repeat(" ", 4) + "1.00"
@@ -128,14 +138,14 @@ func TestHostWidthWidensForLongHost(t *testing.T) {
 	host := "2001:0db8:85a3:0000:0000:8a2e:0370:7334" // 39 chars
 	layout := plainLayout(host)
 	got := layout.Header()
-	// HOST field 39 wide + 1 sep → 36 spaces between "HOST" and "STATUS".
-	want := "TIME      HOST" + strings.Repeat(" ", 36) + "STATUS  DURATION       MIN     MAX     AVG     FAILS"
+	// HOST field 39 wide + 1 sep → 36 spaces between "HOST" and "STATE".
+	want := "TIME      HOST" + strings.Repeat(" ", 36) + "STATE DURATION       MIN     MAX     AVG     FAILS"
 	if got != want {
 		t.Errorf("wide header mismatch:\n got: %q\nwant: %q", got, want)
 	}
 	ln := Line{Time: t0, Status: state.StatusUp, Duration: time.Second, Stats: buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1)}
 	got = layout.FormatLine(ln)
-	// STATUS column must sit at 26 + (39-15) = 50.
+	// STATE column must sit at 26 + (39-15) = 50.
 	if !strings.HasPrefix(got[50:], "up") {
 		t.Errorf("status not at widened column 50: %q", got)
 	}
@@ -148,7 +158,7 @@ func TestHostTruncationOver40(t *testing.T) {
 	got := layout.FormatLine(ln)
 	// Host truncated to 40: 39 x's + "…", then 1 sep, then "up".
 	want := "11:00:35  " + strings.Repeat("x", 39) + "…" + " " + "up" +
-		strings.Repeat(" ", 6) + "0d 00:00:01" +
+		strings.Repeat(" ", 4) + "0d 00:00:01" +
 		strings.Repeat(" ", 4) + "1.00" +
 		strings.Repeat(" ", 4) + "1.00" +
 		strings.Repeat(" ", 4) + "1.00"
@@ -227,12 +237,13 @@ func TestRFC3339HeaderAndLine(t *testing.T) {
 
 func TestFullWidthStable(t *testing.T) {
 	// The padded width used for live overwrite must equal the sum of field
-	// widths + separators, independent of content.
+	// widths + separators, independent of content. Minimum line = 64
+	// fixed + 15 HOST = 79 — under 80 (DECISIONS #68).
 	layout := plainLayout("192.168.1.23")
 	short := layout.FormatLine(Line{Time: t0, Status: state.StatusUp, Duration: time.Second, Stats: buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1)})
 	_ = short
-	if layout.FullWidth() != 81 {
-		t.Errorf("FullWidth = %d, want 81", layout.FullWidth())
+	if layout.FullWidth() != 79 {
+		t.Errorf("FullWidth = %d, want 79", layout.FullWidth())
 	}
 }
 
@@ -262,29 +273,29 @@ func TestLayoutResizeContentFit(t *testing.T) {
 	if l2.hostWidth != 29 {
 		t.Errorf("Resize(200) = %d, want 29", l2.hostWidth)
 	}
-	l2.Resize(90) // only 24 left → capped
-	if l2.hostWidth != 24 {
-		t.Errorf("Resize(90) = %d, want 24 (terminal cap)", l2.hostWidth)
+	l2.Resize(90) // only 26 left → capped
+	if l2.hostWidth != 26 {
+		t.Errorf("Resize(90) = %d, want 26 (terminal cap)", l2.hostWidth)
 	}
-	l2.Resize(81) // exactly the minimum
+	l2.Resize(79) // exactly the minimum (79 = 64 fixed + 15 HOST)
 	if l2.hostWidth != 15 {
-		t.Errorf("Resize(81) = %d, want 15 (floor)", l2.hostWidth)
+		t.Errorf("Resize(79) = %d, want 15 (floor)", l2.hostWidth)
 	}
 	if l2.displayHost != "a-very-long-ho…" {
 		t.Errorf("displayHost after floor resize = %q, want 14 cells + ellipsis", l2.displayHost)
 	}
-	l2.Resize(80) // below the floor: NO further retraction
+	l2.Resize(78) // below the floor: NO further retraction
 	if l2.hostWidth != 15 {
-		t.Errorf("Resize(80) = %d, want 15 (no retraction below min)", l2.hostWidth)
+		t.Errorf("Resize(78) = %d, want 15 (no retraction below min)", l2.hostWidth)
 	}
 
 	l3 := NewLayout(strings.Repeat("x", 41), "HH:MM:SS", nil) // > 40 → cap
 	if l3.hostWidth != 40 {
 		t.Fatalf("41-char host width = %d, want 40", l3.hostWidth)
 	}
-	l3.Resize(100) // 34 left → capped by the terminal
-	if l3.hostWidth != 34 {
-		t.Errorf("Resize(100) = %d, want 34", l3.hostWidth)
+	l3.Resize(100) // 36 left → capped by the terminal
+	if l3.hostWidth != 36 {
+		t.Errorf("Resize(100) = %d, want 36", l3.hostWidth)
 	}
 	l3.Resize(70) // 4 left → floor
 	if l3.hostWidth != 15 {
@@ -346,24 +357,25 @@ func TestTruncateHostRuneBased(t *testing.T) {
 
 func TestLiveLineAnimationFrame(t *testing.T) {
 	// The liveness animation occupies the last cell of the DURATION
-	// field's padding (column 47): finalized lines keep a plain space
-	// (byte-identical to spec §7.4), live lines show the rising bar there,
-	// and the DURATION↔MIN separator (column 48) stays a space so the bar
-	// floats between the values with whitespace on both sides.
+	// field's padding (column 45 at the HOST-15 minimum): finalized lines
+	// keep a plain space (byte-identical to spec §7.4), live lines show
+	// the rising bar there, and the DURATION↔MIN separator (column 46)
+	// stays a space so the bar floats between the values with whitespace
+	// on both sides.
 	layout := plainLayout("192.168.1.23")
 	ln := Line{Time: t0, Status: state.StatusUp, Duration: time.Second, Stats: buildStats(time.Millisecond, 3*time.Millisecond, 2*time.Millisecond, 2)}
 
-	// Finalized line: plain spaces at columns 47-48, MIN at column 49.
+	// Finalized line: plain spaces at columns 45-46, MIN at column 47.
 	fin := layout.FormatLine(ln)
-	if fin[47] != ' ' || fin[48] != ' ' {
-		t.Errorf("finalized separator cols 47-48 = %q/%q, want spaces", fin[47], fin[48])
+	if fin[45] != ' ' || fin[46] != ' ' {
+		t.Errorf("finalized separator cols 45-46 = %q/%q, want spaces", fin[45], fin[46])
 	}
-	if !strings.HasPrefix(fin[49:], "1.00") {
-		t.Errorf("MIN not at col 49 in finalized line: %q", fin)
+	if !strings.HasPrefix(fin[47:], "1.00") {
+		t.Errorf("MIN not at col 47 in finalized line: %q", fin)
 	}
 
-	// Live line: every frame renders at column 47 (inside the DURATION
-	// padding), the separator at 48 stays a space, MIN stays at 49, and
+	// Live line: every frame renders at column 45 (inside the DURATION
+	// padding), the separator at 46 stays a space, MIN stays at 47, and
 	// the frame cycles through the rising bar.
 	want := []rune{'▁', '▃', '▅', '▇'}
 	for i := 0; i < 8; i++ {
@@ -373,15 +385,15 @@ func TestLiveLineAnimationFrame(t *testing.T) {
 		}
 		live := layout.FormatLiveLine(ln, fr)
 		runes := []rune(live)
-		if runes[47] != fr {
-			t.Errorf("live frame at col 47 = %q, want %q (line %q)", runes[47], fr, live)
+		if runes[45] != fr {
+			t.Errorf("live frame at col 45 = %q, want %q (line %q)", runes[45], fr, live)
 		}
-		if runes[48] != ' ' {
-			t.Errorf("separator at col 48 = %q, want space (bar must not touch MIN): %q", runes[48], live)
+		if runes[46] != ' ' {
+			t.Errorf("separator at col 46 = %q, want space (bar must not touch MIN): %q", runes[46], live)
 		}
-		// MIN value must still start at column 49 (animation must not
+		// MIN value must still start at column 47 (animation must not
 		// shift the columns).
-		if !strings.HasPrefix(string(runes[49:]), "1.00") {
+		if !strings.HasPrefix(string(runes[47:]), "1.00") {
 			t.Errorf("MIN shifted by animation: %q", live)
 		}
 	}

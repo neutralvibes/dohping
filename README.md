@@ -92,18 +92,21 @@ Timing model: the first probe fires immediately, then probes start one
   carriage returns
 
 ```text
-TIME      HOST            STATUS  DURATION       MIN     MAX     AVG     FAILS
-11:00:35  192.168.1.23    up      0d 00:35:26    1.70    5.90    2.70
-11:05:23  192.168.1.23    down    0d 00:01:05                                23
+TIME      HOST            STATE DURATION       MIN     MAX     AVG     FAILS
+11:00:35  192.168.1.23    up    0d 00:35:26    1.70    5.90    2.70
+11:05:23  192.168.1.23    down  0d 00:01:05                                23
 ```
 
-Columns: `TIME` (status start), `HOST`, `STATUS`, `DURATION` (`Nd
+Columns: `TIME` (status start), `HOST`, `STATE`, `DURATION` (`Nd
 HH:MM:SS`, capped at `99d+`), `MIN`/`MAX`/`AVG` RTT in ms (blank when
 down), `FAILS` (consecutive failed probes while down). The HOST column is
 elastic: as wide as the host needs (min 15, max 40, truncated with `…`),
 and in window mode it also re-measures against the terminal width on every
 resize — long hosts expand when room exists, and a narrow terminal forces
-the column to retract rather than wrap.
+the column to retract rather than wrap. The minimum line is 79 cells
+(64 fixed + 15 HOST) — it fits an 80-column terminal. The state column
+shows `?` while no probe has established the state yet (the word
+`unknown` is used in the exit summary).
 
 ### Window mode
 
@@ -120,7 +123,7 @@ count is reduced to fit.
 immediately; on Windows (no SIGWINCH) the 1-second tick re-measures, so
 resizes self-heal within a second. Every repaint re-reads the terminal
 size: the HOST column retracts/expands to fit (minimum 15 + the fixed
-columns = 81 cells), and if the terminal is narrower than that minimum the
+columns = 79 cells), and if the terminal is narrower than that minimum the
 lines wrap but the block stays a coherent, non-interleaved stack. On
 reflowing terminals (Windows Terminal, Terminal.app, iTerm2) a resize
 re-wraps the block in a way the program cannot observe; dohping pauses

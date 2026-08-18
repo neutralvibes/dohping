@@ -185,7 +185,9 @@ func (d *Display) printFinalized(s string) {
 	}
 	tw := d.termWidth()
 	d.resizeNote(tw)
+	oldPhys := d.lastPhysRows
 	d.resizeRestart() // force: finalize must land correctly even mid-episode
+	d.resizeMarkAbove(oldPhys, s, tw)
 	var sb strings.Builder
 	if d.lastPhysRows > 1 {
 		fmt.Fprintf(&sb, "\x1b[%dA\r", d.lastPhysRows-1)
@@ -231,7 +233,9 @@ func (d *Display) writeLive(s string) {
 	d.resizeNote(tw)
 	if d.resizePending {
 		if d.now().Sub(d.resizeSince) >= resizeSettleDelay {
+			oldPhys := d.lastPhysRows
 			d.resizeRestart() // settled: fresh row below the frozen line
+			d.resizeMarkAbove(oldPhys, s, tw)
 		} else {
 			return // mid-reflow: defer the in-place write
 		}
@@ -294,6 +298,23 @@ func (d *Display) resizeRestart() {
 	d.resizePending = false
 	fmt.Fprint(d.w, "\r\n")
 	d.lastPhysRows = 1
+}
+
+// resizeMarkAbove marks the frozen row directly above the fresh rendering
+// as a resize artifact (a single '-') when it is provably a single row
+// (DECISIONS #68): if the previous live line occupied exactly one
+// physical row AND the fresh line also fits in one row at the new width,
+// the frozen (re-wrapped) line is exactly the row above — on reflowing
+// and non-reflowing terminals alike — so its TIME is replaced with a
+// marker instead of leaving a duplicate-looking data row in scrollback.
+// When either width wraps the line, the frozen head is no longer the row
+// above and the mark is skipped (honest degradation). Called after
+// resizeRestart, with the cursor on the fresh row.
+func (d *Display) resizeMarkAbove(oldPhys int, s string, tw int) {
+	if oldPhys != 1 || physicalRows(cellWidth(s), tw) != 1 {
+		return
+	}
+	fmt.Fprint(d.w, "\x1b[1A\r-\x1b[K\x1b[1B\r")
 }
 
 // termWidth returns the terminal width in cells (0 = unknown → no wrap).
