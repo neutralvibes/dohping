@@ -233,6 +233,16 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   remote-gateway mode). Serve root: `/home/hermes/.hermes/user/rig/served/`.
 - Published at `https://files.hermes.home/dohping/` (basic auth: user `hermes`,
   password in Hermes memory — re-share only if user asks).
+- **VERSIONED FILENAMES (2026-08-18 lesson)**: every build is ALSO published
+  as `dohping-<os>-<arch>-<sha8>` (e.g. `dohping-linux-amd64-0014967e`) plus
+  an `INDEX.txt` build history. The plain name is the latest SHIPPED build.
+  Windows renames same-name re-downloads ("(1)"), which once caused a
+  stale-binary test to wrongly reject a build — never rely on the plain
+  name alone for a test round; tell the user the exact versioned filename
+  (or the sha) to download. As of round 18: `dohping-linux-amd64-0014967e`
+  = shipped B; `dohping-linux-amd64-8dcce21a` = round-17 reclaim, published
+  as EXPERIMENTAL pending a proper retest (the original rejection may have
+  tested a stale file).
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
