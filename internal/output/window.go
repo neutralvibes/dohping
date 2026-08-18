@@ -46,21 +46,11 @@ import (
 // block (any line of the last completed frame changes its physical row
 // count at the new width). A same-band resize (every line keeps its rows,
 // so a reflow leaves the block untouched) repaints in place at the new
-// columns instead of leaving a frozen block behind, with no settle wait
-// (DECISIONS #75-B: the #73 defer was reverted — see below).
-//
-// DECISIONS #75-B (2026-08-18): the round-15 defer (DECISIONS #73) is
-// REVERTED — same-band repaints happen immediately again. The defer made
-// the on-screen frame stale during drags, which moved the conditional
-// freeze back above the floor (frozen copies at every pause; user:
-// "now it seems to wrap nearly every time"). The pre-defer behavior the
-// user accepted in #72 returns: the frame tracks the width, the freeze is
-// reachable only below the essentials floor, and an event-timed repaint
-// can land a row off mid-reflow on ConPTY — a transient shift that
-// self-corrects on the next repaint (the documented #72 lived-with
-// floor). The reflow-aware reclaim (SPEC-window-resize-reclaim.md) was
-// also tried and failed the user's terminal test ("this wraps… leaves
-// residue"); both are gone.
+// columns instead of leaving a frozen block behind — but only after the
+// width has been stable for resizeSettleDelay (DECISIONS #73): an
+// event-timed redraw landing mid-reflow writes to a canvas that is still
+// moving, which shifts the block by a row. Same-band repaints are
+// deferred, never restarted.
 type Window struct {
 	w        io.Writer
 	layout   *Layout
@@ -79,6 +69,7 @@ type Window struct {
 	resizeSince   time.Time // when the current width change was first observed
 	resizePending bool      // width changed; redraws frozen until the terminal settles
 	lastRows      []string  // rendered rows of the last COMPLETED frame (resize reflow check)
+	deferPending  bool      // same-band width change; repaints deferred until the width settles (#73)
 }
 
 // NewWindow builds a window display. lines is the visible data-line count
@@ -149,11 +140,14 @@ func (w *Window) Finalize() {
 	w.cur = nil
 	// A resize in flight forces the restart: the final block must land
 	// below the frozen rendering, never reclaim it (DECISIONS #67). The
-	// freeze decision itself is conditional (#70) — observeResize.
+	// freeze decision itself is conditional (#70) — observeResize. A
+	// same-band defer (#73) is cleared: the final block must render now,
+	// not wait out the settle.
 	tw, _ := w.terminalSize()
 	w.observeResize(tw)
-	forced := w.resizePending
+	forced := w.resizePending || w.deferPending
 	w.resizeRestart()
+	w.deferPending = false
 	if forced {
 		debugx.Debugf("redraw", "finalize forces render (tw=%d)", tw)
 	}
@@ -207,7 +201,7 @@ func (w *Window) Redraw() {
 	// that no write landed mid-reflow, and the settle repaint records
 	// the block's physical span against the previous frame's (a span
 	// mismatch is how a shifted block shows up in the log).
-	interesting := w.resizePending
+	interesting := w.resizePending || w.deferPending
 	w.observeResize(tw)
 	if w.resizePending {
 		if w.now().Sub(w.resizeSince) >= resizeSettleDelay {
@@ -216,6 +210,22 @@ func (w *Window) Redraw() {
 		} else {
 			debugx.Debugf("redraw", "suppressed (freeze, %v left of settle)", resizeSettleDelay-w.now().Sub(w.resizeSince))
 			return // mid-reflow: defer the redraw
+		}
+	}
+	if w.deferPending {
+		// Same-band resize (DECISIONS #73): the reflow cannot move the
+		// block, but the terminal is mid-reflow right now — writing now
+		// lands on a canvas that is still moving. Defer the in-place
+		// repaint until the width has been stable for resizeSettleDelay,
+		// then repaint in place (no frozen block, no restart). Every
+		// further width change restarts the settle clock (a drag extends
+		// the hold).
+		if w.now().Sub(w.resizeSince) >= resizeSettleDelay {
+			debugx.Debugf("redraw", "defer released → in-place repaint")
+			w.deferPending = false
+		} else {
+			debugx.Debugf("redraw", "deferred (settle, %v left)", resizeSettleDelay-w.now().Sub(w.resizeSince))
+			return
 		}
 	}
 	if tw > 0 {
@@ -340,20 +350,20 @@ func (w *Window) terminalSize() (int, int) {
 }
 
 // observeResize records a width change and decides how the block must
-// behave (DECISIONS #67 + #70; the #73 defer and #75 reclaim are
-// reverted — #75-B). A reflowing terminal re-wraps existing lines on
-// width change, but a line that keeps its physical row count cannot move
-// in a reflow (it fits in the same rows at both widths — the DECISIONS
-// #68 safety reasoning, generalized from one line to the whole block).
-// So: if any row of the last COMPLETED frame changes its physical row
-// count at the new width, the block would move and redraws FREEZE until
-// the width has been stable for resizeSettleDelay, then restart below
-// the frozen rendering; if every row keeps its count, the block simply
-// repaints in place at the new columns (no freeze, no settle wait). A
-// drag across further widths restarts the settle clock while a freeze is
-// pending. The first observation only calibrates lastWidth; no decision
-// runs before a frame has been completed. No-op when the width is
-// unknown (≤ 0).
+// behave (DECISIONS #67 + #70 + #73). A reflowing terminal re-wraps
+// existing lines on width change, but a line that keeps its physical row
+// count cannot move in a reflow (it fits in the same rows at both widths
+// — the DECISIONS #68 safety reasoning, generalized from one line to the
+// whole block). So: if any row of the last COMPLETED frame changes its
+// physical row count at the new width, the block would move and redraws
+// FREEZE until the width has been stable for resizeSettleDelay, then
+// restart below the frozen rendering; if every row keeps its count, the
+// block may be reclaimed in place — but the repaint is DEFERRED for the
+// same settle delay (#73), so no event-timed redraw lands mid-reflow.
+// While either is pending, every further width change restarts the settle
+// clock (a drag extends the hold). The first observation only calibrates
+// lastWidth; no decision runs before a frame has been completed. No-op
+// when the width is unknown (≤ 0).
 func (w *Window) observeResize(tw int) {
 	if tw <= 0 {
 		return
@@ -386,15 +396,20 @@ func (w *Window) observeResize(tw int) {
 	if reflowed != w.lastPhysRows {
 		w.resizeSince = w.now()
 		w.resizePending = true
+		w.deferPending = false
 		debugx.Debugf("resize", "%d→%d rows %d→%d → FREEZE (block would move)", old, tw, w.lastPhysRows, reflowed)
 	} else {
-		// Same band: nothing moved, so the block repaints in place at
-		// the new columns — no freeze, no restart, no settle wait. The
-		// repaint lands on whatever the terminal's current reflow looks
-		// like; on ConPTY the cursor can be a row off mid-reflow, but
-		// the transient shift self-corrects on the next repaint (the
-		// documented #72 lived-with floor).
-		debugx.Debugf("resize", "%d→%d rows %d→%d → in place", old, tw, w.lastPhysRows, reflowed)
+		// Same band: nothing moved, so the block may be reclaimed in
+		// place — but NOT this instant. The terminal is reflowing right
+		// now, and an event-timed redraw (probe/tick) landing mid-reflow
+		// writes to a canvas that is still moving, shifting the block by
+		// a row (user report: "when it wraps it creates another area to
+		// write to"). Defer the repaint until the width settles (DECISIONS
+		// #73) — the same hold the plain display has, without a frozen
+		// block or restart.
+		w.resizeSince = w.now()
+		w.deferPending = true
+		debugx.Debugf("resize", "%d→%d rows %d→%d → defer (in-place after settle)", old, tw, w.lastPhysRows, reflowed)
 	}
 }
 

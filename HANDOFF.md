@@ -83,18 +83,6 @@ probe (window-same-band): winch → resize 60→55 rows 11→11 → defer →
 two suppressed redraws → defer released → repainted tw=55 phys=11 (was
 11). gosec G703 annotated (taint twin of G304, same operator boundary).
 dist sha e1221b96….
-Round 18 (DECISIONS #76, 2026-08-18): B — rounds 15 (#73 defer) and 17
-(#75 reflow-aware reclaim) are REVERTED. The user's terminal test of the
-reclaim failed ("this wraps… does not do it cleanly… leaves residue") and
-the user elected B: "For now I want B and I will keep it like that for a
-while so I can move on." Window mode is back to the round-13/14 state
-accepted at #72: same-band repaints IMMEDIATELY (the frame tracks the
-width; the conditional freeze is reachable only below the essentials
-floor), crossings freeze → restart below (one frozen copy in scrollback),
-and the transient mid-reflow shift on ConPTY is the documented lived-with
-floor. The debug facility (#74) is retained as-is. SPEC-window-resize-
-reclaim.md deleted. RESIZE WORK IS CLOSED — no more rounds unless the
-user reopens it. dist sha 0014967e….
 
 ---
 
@@ -171,18 +159,19 @@ and stage-marking; if in doubt, ASK, don't assume).
 | 70 | Window-mode resize freeze is CONDITIONAL: freeze only when the reflow would move the block (any row of the last completed frame changes its physical row count at the new width — observeResize compares Σ physicalRows(lastRows, newW) vs lastPhysRows); same-band resizes repaint in place, no frozen block left behind. Pending freeze still restarts the settle clock on every further width change (drag behavior unchanged). PLAIN display untouched. User's column-trim idea parked (window mode may be rethought) | "This happens on resize window mode, making it less wider causes it" — user's ~55–60 col terminal stacked a frozen block per width change; #67 froze on every change even when the layout absorbed it (60→55 = 12 rows both widths; same-band lines cannot move in a reflow — the #68 safety reasoning generalized). Screenshot proved AVG 3.92 wrapping mid-value |
 | 71 | WINDOW-MODE COLUMN TRIM (the user's original idea): below the 79-cell line minimum the rightmost columns drop (FAILS→AVG→MAX→MIN, header in sync) so the line fits instead of wrapping — down to essentials TIME/HOST/STATE/DURATION (46 cells; the live line's animation frame keeps DURATION untrimmed). HOST retracts first (#64), then columns. Plain untouched. Combined with #70, window-mode resize is now a uniform in-place repaint at any width ≥ 46 — the freeze is only reachable below 46 | "My terminal doesn't live in any band, I am testing so use it accordingly" — #70 only separated same-band from crossing, and free testing crosses constantly; trimming eliminates the crossings themselves. Built after the conditional freeze proved invisible to the user's testing |
 | 74 | Optional debug logging facility (`internal/debugx`): no-op by default, enabled ONLY by `DOHPING_DEBUG=<path>` (or `SetWriter` in code/tests); appends RFC3339-ms `[tag]` lines to a 0600 file. Tags: `display` (mode), `winch` (SIGWINCH), `tick` (1s repaint), `resize` (every width change + freeze/defer decision with physical-row counts), `redraw` (suppressed/deferred/released/restarted + settle repaint's phys span — a shifted block = span mismatch). A path that cannot be opened disables with a stderr warning (never breaks a run); file-only because the display owns the terminal. Verified end-to-end via the PTY probe: winch → resize 60→55 rows 11→11 → defer → 2 suppressed redraws → defer released → repainted tw=55 phys=11 (was 11) | "Have you even seen a terminal tell you the width you are resizing to?" — no terminal displays the width during a drag; asking the user to report widths or whether the drag "dipped below 46" asked them to read a display that doesn't exist (same class of mistake as paste-blindness). The app is the only instrument that sees every width in the sweep, so the evidence must come from its own log. "Add it, perhaps we should have had a facility for a debug logger already, just only enabled by code or ENV" — general facility (env-or-code), of which the resize forensics are the first consumers. gosec G703 annotated (taint twin of G304 on the same line; operator trust boundary identical to `--log-file`, #63 precedent) |
-| 76 | B: rounds 15 (#73 defer) and 17 (#75 reflow-aware reclaim) are REVERTED. Window mode returns to the round-13/14 state accepted at #72: same-band repaints immediately (frame tracks the width; the conditional freeze is reachable only below the essentials floor), crossings freeze → restart below (one frozen copy per crossing), and the transient mid-reflow shift on ConPTY is the documented lived-with floor. The round-16 debug facility (#74) is retained. SPEC-window-resize-reclaim.md deleted. Gates: gofmt/vet clean, 7/7 race-clean, golangci-lint + staticcheck + gosec clean, probe scenarios all PASS. dist sha 0014967e… | User: "this wraps… does not do it cleanly… leaves residue" (reclaim failed the real-terminal test) + "For now I want B and I will keep it like that for a while so I can move on" — RESIZE WORK IS CLOSED; no more rounds unless the user reopens it |
 
 ## 4. Pending / next actions
 
 - **User confirmed the plain-view resize fix on the real terminal (2026-08-18,
   DECISIONS #69)** — freeze-and-restart reads well ("much nicer visual").
-- **RESIZE WORK IS CLOSED (DECISIONS #76, 2026-08-18).** Rounds 15 and 17
-  reverted. Window mode back to the round-13/14 state: same-band repaints
-  immediately, crossings freeze then restart below (one frozen copy per
-  crossing), the transient mid-reflow shift is the documented lived-with
-  floor. The debug facility (#74) is retained. No more resize rounds
-  unless the user reopens it.
+- **Round 15 (#73) shipped 2026-08-18 (dist sha 44c82b29…); round 16
+  (#74) added the debug logging facility as the evidence path — the
+  user's next drag-test runs with `DOHPING_DEBUG=/tmp/dohping-debug.log`
+  and the LOG (not screenshots/pastes, which are wrap-blind) is the
+  evidence for any residual fracture.** If the user reports another
+  acceptance issue: reproduce, fix, add regression test, re-run gates,
+  rebuild `dist/` via `scripts/release.sh`, republish to the rig (§6),
+  record DECISIONS + CHECKPOINT entries, commit.
 - **HELD PLAN — reusable terminal test rig** (idea user-approved 2026-08-18,
   build explicitly on hold until user says go): full plan in §10.
 - **Animation is user-testing territory**: the rising-bar placement (col 47) and
@@ -246,9 +235,8 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200.
-- Current published linux-amd64 sha: `0014967ef8d0…` (2026-08-18, round #76:
-  B — rounds 15/17 reverted, round-13/14 window resize behavior restored;
-  served = dist, verified byte-identical over TLS).
+- Current published linux-amd64 sha: `e1221b9600c5…` (2026-08-18, round #74:
+  debug logging facility; served = dist, verified byte-identical over TLS).
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works
@@ -300,11 +288,13 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - **Resize forensics via the debug log (DECISIONS #74)**: for the user's
   real-terminal drag tests, the evidence is `DOHPING_DEBUG=<path> dohping
   --window HOST` — the app logs its own width observations (`winch`, `tick`,
-  `resize` with the freeze/in-place decision, `redraw` with the settle
-  repaint's phys span). No terminal displays the width during a drag, so
-  this log is the only record of the sweep; ask the user for it instead of
-  widths or screenshots. Tags and format: `internal/debugx` + README
-  "Debug logging". The PTY probe passes the env var through.
+  `resize` with the freeze/defer decision, `redraw` with the settle repaint's
+  phys span). No terminal displays the width during a drag, so this log is
+  the only record of the sweep; ask the user for it instead of widths or
+  screenshots. Tags and format: `internal/debugx` + README "Debug logging".
+  The PTY probe passes the env var through (verified: the window-same-band
+  run produced the full episode: winch → resize 60→55 rows 11→11 → defer →
+  suppressed redraws → defer released → repainted tw=55 phys=11 (was 11)).
 - Regression tests must accompany every acceptance fix (that's the established
   pattern, #50–66 all have them).
 
