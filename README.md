@@ -138,6 +138,15 @@ the old block stays in scrollback as history, and the live data is always
 correct from the next repaint. Plain line mode's single live line has its
 own freeze treatment (see above).
 
+**A note on resizing — resizing terminals can cause output to fracture.**
+On reflowing terminals (Windows Terminal, Terminal.app, iTerm2) a resize
+re-wraps the whole screen in ways the program cannot observe, so a window
+block may briefly show wrapped or duplicated rows while it self-corrects
+on the next repaint (within a second, or immediately on Unix via
+SIGWINCH). Below ~46 columns even the essentials (TIME/HOST/STATE/DURATION)
+cannot fit and the lines wrap — coherently, but wrapped. Hosts with
+RTT ≥ 10,000 ms overflow their RTT columns and widen the line.
+
 ## Logging
 
 `--log-file PATH` appends one line per finalized status event (append-only,

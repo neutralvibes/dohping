@@ -46,8 +46,19 @@ accordingly" — the #70 freeze only separates same-band from crossing, and
 free testing crosses constantly; trimming eliminates the crossings
 themselves. Resize behavior is now UNIFORM: at any width ≥ 46 a resize is
 an in-place repaint with zero artifacts; the freeze is reachable only
-below 46. Plain untouched. Remaining gate: user's real-terminal test
-(built 2026-08-18, dist sha 5d79fd9b…).
+below 46. Plain untouched.
+Round 14 (DECISIONS #72, 2026-08-18): USER ACCEPTED the trim ("This works
+much better") with a caveat — "sometimes it still wraps… This may have to
+be lived with, with a note specifying resizing terminals can cause output
+to fracture". The README now carries that note with the three named
+mechanisms: (a) reflowing-terminal drag race (the app samples width on the
+1s tick; a fast drag jumps through trim thresholds unseen and the terminal
+reflows the old rendering regardless — transient wrapped/duplicated rows,
+self-correcting on the next repaint); (b) below ~46 cols the essentials
+wrap by design; (c) RTT ≥ 10,000 ms overflows the 7-cell RTT fields
+(verified: "10000.00" = 8 cells) and widens the line. Docs-only; optional
+future mitigations (RTT clamp, big-jump conservative freeze) recorded but
+NOT built. dist sha 5d79fd9b….
 
 ---
 
@@ -128,11 +139,13 @@ and stage-marking; if in doubt, ASK, don't assume).
 
 - **User confirmed the plain-view resize fix on the real terminal (2026-08-18,
   DECISIONS #69)** — freeze-and-restart reads well ("much nicer visual").
-- **Round 13 (#71) shipped and awaiting the user's real-terminal test**:
+- **Round 13 (#71) USER-ACCEPTED with a caveat (2026-08-18, DECISIONS #72)**:
   window mode trims rightmost columns below 79 cells so the line never
-  wraps — resize is now a uniform in-place repaint at any width ≥ 46
-  (the user's "my terminal doesn't live in any band" correction drove it;
-  #70's conditional freeze is now reachable only below 46). PLAIN display
+  wraps — resize is a uniform in-place repaint at any width ≥ 46. The user
+  confirmed "works much better" but "sometimes it still wraps" — accepted
+  as a lived-with limitation with a README note (resizing terminals can
+  fracture output; mechanisms documented: reflowing-terminal drag race,
+  sub-46 wrap by design, RTT ≥ 10,000 ms column overflow). PLAIN display
   deliberately untouched. If the user reports another acceptance issue:
   reproduce, fix, add regression test, re-run gates, rebuild `dist/` via
   `scripts/release.sh`, republish to the rig (§6), record DECISIONS +
