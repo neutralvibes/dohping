@@ -125,6 +125,7 @@ echo
 echo "publish/ ready: $(git -C "$PUB" ls-files | wc -l) file(s), $(git -C "$PUB" log --oneline | wc -l) commit(s)"
 echo "  latest: $(git -C "$PUB" log -1 --format='%h %s')"
 echo
-echo "To publish (on YOUR machine — this script never pushes):"
-echo "  git -C $PUB remote add origin git@github.com:YOU/dohping.git   # once"
-echo "  git -C $PUB push -u origin master                              # each publish"
+echo "Push workflow (agent-handled, user-approved):"
+echo "  the agent adds the origin remote, pushes publish/ master to a branch,"
+echo "  and opens a PR; the user approves the merge to main. This script never"
+echo "  pushes on its own."

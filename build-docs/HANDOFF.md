@@ -343,9 +343,12 @@ The repo is destined for GitHub. Two layers keep the internal build docs out:
   forbidden (build docs, dist, .notify-state, publish itself) and (b) the
   committed file list equals the contract EXACTLY, then commits a snapshot
   named after the private sha. Idempotent (no-op if nothing changed). The
-  script NEVER pushes — it prints the `remote add` + `push` commands for the
-  user's machine. `scripts/publish-github.sh` is intentionally NOT published
-  (housekeeping for the private tree).
+  script NEVER pushes on its own — pushing is agent-handled OUTSIDE the
+  script: the agent adds the origin remote (git + PAT credential helper;
+  `gh` NOT installed on the sandbox), pushes publish/ master to a branch,
+  and opens a PR; the USER approves the merge to main. First publish will
+  need the repo URL + token from the user; token must include `workflow`
+  scope when the §10 CI workflow (which pushes .github/workflows) ships.
 - **README is the only public doc.** It must never reference build-docs/
   files (scrubbed 2026-08-18; development section now points at release.sh +
   pty-resize-probe.py).
