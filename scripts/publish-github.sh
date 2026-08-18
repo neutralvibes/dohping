@@ -27,7 +27,6 @@ PUB="$ROOT/publish"
 PUBLIC_ITEMS=(
   README.md
   LICENSE
-  .gitignore
   go.mod
   go.sum
   cmd
@@ -45,8 +44,10 @@ FORBIDDEN=(
 )
 
 # The public repo's own .gitignore (independent of the working tree's).
-PUB_GITIGNORE='dohping
-dohping.exe
+# Root-anchored: `/dohping` ignores only the built binary at repo root,
+# NOT the cmd/dohping/ source directory.
+PUB_GITIGNORE='/dohping
+/dohping.exe
 dist/
 *.test
 '
