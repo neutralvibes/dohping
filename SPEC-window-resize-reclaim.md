@@ -1,10 +1,13 @@
 # SPEC — Window-mode resize: reflow-aware in-place reclaim
 
-Status: **APPROVED 2026-08-18 (option A; B = revert #73 is the pre-agreed
-fallback if the user's real-terminal test fails). Built as DECISIONS #75.
+Status: **APPROVED + SHIPPED 2026-08-18 (DECISIONS #78).** Built as
+DECISIONS #75, rejected on a stale-binary report (#76), properly retested
+(#77: "holds up really well but is not faultless") and promoted after B's
+direct rejection ("0014967e is out… This one should be set as the shipped
+build"). Shipped linux-amd64 = 8dcce21a…, byte-reproduced via release.sh.
 Non-reflowing terminals: the crossing reclaim is a documented limitation
-(§4, option A).** Author: Hermes. Date: 2026-08-18.
-Read with: DECISIONS #70–75 (the history this supersedes), SPECIFICATION.md §8.
+(§4, option A). Author: Hermes. Date: 2026-08-18.
+Read with: DECISIONS #70–78 (the history), SPECIFICATION.md §8.
 
 ---
 
