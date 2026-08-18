@@ -123,6 +123,17 @@ Full per-fix history: DECISIONS.md (78 entries, each with rationale).
 
 ## 4. Pending / next actions
 
+- **Publish-prep TODO (user-flagged 2026-08-18):** user to get their GitHub
+  numeric ID for the no-reply commit email (`<ID>+<username>@users.noreply.github.com`).
+  Deliberate opsec: public commits must not advertise agent involvement —
+  commit identity reads as the project owner. Then: set
+  `git -C publish config user.name` / `user.email` to the user's identity
+  (the publish script only sets identity on repo init, so it won't overwrite),
+  **amend the baseline snapshot commit `fefce20`** (currently authored
+  "Hermes Agent <hermes@hermes.home>") BEFORE the first push — nothing pushed
+  yet, so the rewrite is free — and fill the LICENSE holder line with the
+  same name. Public history should then carry zero agent trace.
+
 - **Resize: RESOLVED and SHIPPED (#78).** If a resize report comes back, the
   evidence path is the debug log (`DOHPING_DEBUG=<path> dohping --window HOST`
   — tags `winch`/`tick`/`resize`/`redraw`, incl. `reclaim in place (R=… N=…
