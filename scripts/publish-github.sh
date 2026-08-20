@@ -33,6 +33,7 @@ PUBLIC_ITEMS=(
   internal
   scripts/release.sh
   scripts/pty-resize-probe.py
+  .github/workflows/ci.yml
 )
 
 # Files that must NEVER appear in the published tree (checked by name).

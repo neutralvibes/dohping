@@ -123,22 +123,72 @@ Full per-fix history: DECISIONS.md (78 entries, each with rationale).
 
 ## 4. Pending / next actions
 
-- **Publish-prep TODO (user-flagged 2026-08-18):** user to get their GitHub
-  numeric ID for the no-reply commit email (`<ID>+<username>@users.noreply.github.com`).
-  Deliberate opsec: public commits must not advertise agent involvement —
-  commit identity reads as the project owner. Then: set
-  `git -C publish config user.name` / `user.email` to the user's identity
-  (the publish script only sets identity on repo init, so it won't overwrite),
-  **amend the baseline snapshot commit `fefce20`** (currently authored
-  "Hermes Agent <hermes@hermes.home>") BEFORE the first push — nothing pushed
-  yet, so the rewrite is free — and fill the LICENSE holder line with the
-  same name. Public history should then carry zero agent trace.
-  **OPEN DECISIONS (parked 2026-08-18 — user decides fresh, NOT the agent):
-  (1) first-commit message wording ("Initial release" + tag v0.1.0 vs the
-  message itself being "v0.1.0"); (2) annotated version tags on every
-  publish — yes/no. See build-docs/PUBLISH-CHECKLIST.md.**
+- **Publish-prep TODO (user-flagged 2026-08-18):** GitHub no-reply identity
+  OBTAINED 2026-08-19: `26578830+neutralvibes@users.noreply.github.com`
+  (ID 26578830 verified via api.github.com). Public commits must read as the
+  project owner — zero agent trace. **ON USER'S EXPLICIT GO — do not run
+ anything before that (2026-08-19):** set `git -C publish config user.name`
+ (neutralvibes) / `user.email`; **amend the baseline snapshot commit
+ `fefce20`** (still "Hermes Agent <hermes@hermes.home>"; nothing pushed yet,
+ so the rewrite is free — `--amend --reset-author` resets BOTH author and
+ committer; proven on repotest 2026-08-19); then **fetch origin/main FIRST
+ and rebase the publish branch onto it** — dohping's GitHub main is seeded
+ (`bf528a7` "Initial commit", LICENSE only, holder "neutralvibes"), and a
+ separately-rooted branch cannot PR (API 422 "no history in common";
+ proven on repotest 2026-08-19); the private LICENSE holder is DONE
+ (filled `github.com/neutralvibes` 2026-08-19 — the derive script copies
+ it, nothing to mirror at go time); then derive
+ publish/, push the branch, open the PR. Resolved
+ 2026-08-19: annotated tags per RELEASE (not per publish); GitHub release
+ assets plain-named `dohping-<os>-<arch>` with the build sha in release
+ notes + SHA256SUMS — sha-prefixed filenames stay rig/local-testing only;
+ user squash-merged the rehearsal PR — squash CONFIRMED as dohping merge
+ policy (2026-08-19). ALL DECISIONS RESOLVED 2026-08-19: first-commit
+ wording "Initial release" + tag v0.1.0; LICENSE holder =
+ `github.com/neutralvibes` (owner-path form, NO protocol — user's pick,
+ 2026-08-19; the GitHub seed says plain "neutralvibes", so the rebase
+ WILL conflict on LICENSE → keep ours). The publish sequence
+ is fully specified — awaiting the user's single "go". See
+ build-docs/PUBLISH-CHECKLIST.md.
 
-- **Resize: RESOLVED and SHIPPED (#78).** If a resize report comes back, the
+ - **CI un-held and BUILT (2026-08-19, user: "CI tests must be setup to run"):**
+  - `.github/workflows/ci.yml` (tracked in the PRIVATE repo; added to
+    PUBLIC_ITEMS so publish/ carries it) — gate job on ubuntu: gofmt, vet,
+    race tests, gosec (prebuilt tarball v2.28.0, never `go install`,
+    DECISIONS #63), fresh-build + all 4 PTY probe scenarios (TCP mode — no
+    ICMP caps on runners), release matrix + SHA256SUMS; gate-windows job:
+    unit tests + vet only (probe is POSIX). Runs on push to main + PRs.
+  - `scripts/check.sh` (new): the shared gate — gofmt, vet, `go test -race`,
+    then golangci-lint/staticcheck/gosec/govulncheck when installed
+    (SKIP, not FAIL, when absent). `release.sh` now calls it first — a red
+    gate refuses to build. Verified locally: gate GREEN (7/7), probes 4/4
+    PASS, release.sh matrix rebuilt with linux-amd64 sha STILL `8dcce21a…`
+    (byte-identical to the shipped build).
+  - BEFORE the first push: the fine-grained token must have the **Workflows
+    permission** (pushing `.github/workflows/` is rejected without it —
+    Contents RW alone is not enough). User to confirm/add in GitHub token
+    settings.
+  - Reusable rig generalization (pty-probe.py, §10) REMAINS HELD — dohping
+    CI uses the dohping-specific probe as-is.
+
+- **dohping setup finalisation (from repotest lessons, 2026-08-19) —
+ checklist, user-paced** (user: one thing at a time; they'll be clear
+ what dohping needs once the repotest procedure is digested):
+ - [ ] Ruleset "main": switch Admin bypass from "always" to **"for pull
+       requests only"** — the tested final config (push layer enforced
+       mechanically, merges frictionless, no deadlock). User UI action:
+       token cannot edit rulesets (PUT → 403).
+ - [ ] Keep approval count=1 as the future gate; **CI/status checks will
+       be the real mechanical reviewer** once a test suite exists (CI is
+       a separate matter, user-flagged; connects to the held §10 CI-ready
+       plan).
+ - [ ] Optional: tag ruleset (no force-update, no deletion) to protect
+       release tags.
+ - [ ] Then the publish-prep sequence above (identity → amend fefce20 →
+       rebase onto origin/main → derive publish/ → branch + PR → user
+       squash-merge → tag v0.1.0 → release with plain assets + SHA256SUMS).
+
+ - **Resize: RESOLVED and SHIPPED (#78).** If a resize report comes back, the
   evidence path is the debug log (`DOHPING_DEBUG=<path> dohping --window HOST`
   — tags `winch`/`tick`/`resize`/`redraw`, incl. `reclaim in place (R=… N=…
   tw=…)` and `reclaimed tw=… phys=… (was …)`) plus the reflow-emulator tests —
@@ -185,6 +235,9 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   versioned filename (or the sha) to download. Current: plain name AND
   `dohping-linux-amd64-8dcce21a` = shipped reclaim; `dohping-linux-amd64-0014967e`
   = REJECTED B, retained as a versioned artifact.
+- GitHub release assets use PLAIN names (`dohping-<os>-<arch>`) — the sha
+  prefix is a rig/local-testing convention only (decided 2026-08-19; see
+  PUBLISH-CHECKLIST.md judgment gates).
 - Publish step after a rebuild: `cp dist/* /home/hermes/.hermes/user/rig/served/dohping/`
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200, and compare
@@ -389,3 +442,89 @@ The repo is destined for GitHub. Two layers keep the internal build docs out:
   gitlink unless the parent ignores `publish/`.
 - When the held §10 CI workflow is built, add `.github/workflows` to
   PUBLIC_ITEMS in the script.
+
+---
+
+## 12. Rehearsal run — neutralvibes/repotest (2026-08-19, ALL STEPS GREEN)
+
+Full dry-run of the publish flow on a throwaway repo before touching dohping.
+Repo: `neutralvibes/repotest` (public, created with LICENSE seed → main born
+at creation with the user's "Initial commit"). Scratch: `~/.hermes/user/tmp/
+repotest/` (teardown pending).
+
+| Step | Result |
+|---|---|
+| Agent-authored first commit (simulating `fefce20`) | ✓ then amended |
+| `git commit --amend --reset-author` → user identity | ✓ author AND committer both reset; tree scan zero agent trace |
+| Push branch (`rehearsal-v0.1.0`) via git + credential store | ✓ |
+| Open PR via REST API | ✗ 422 "no history in common with main" — branch and seeded main are unrelated roots |
+| Rebase branch onto origin/main (resolve seed overlap) | ✓ `GIT_EDITOR=true git rebase --continue` needed (no editor in non-interactive shell); keep the SEED's files on conflict |
+| PR via API (history now shared) | ✓ PR #1 |
+| User squash-merge | ✓ main = "Initial release (#1)" |
+| Annotated tag `v0.1.0` (tagger neutralvibes) + push | ✓ |
+| Release via API + asset upload (plain names) | ✓ `hello.sh` + `SHA256SUMS`; sha in release notes |
+| Branch protection via API | ✗ 403 — token has no Administration scope → user sets in UI |
+| Force-push test (rule INACTIVE) | ✗ force-push to main succeeded — the rule existed but was never enabled |
+| Force-push test (rule ENABLED) | ⚠️ force-push to main STILL succeeded — admin bypass ("include administrators" off); remote only WARNS "Changes must be made through a pull request" |
+| Direct FF push to main (rule enabled) | ⚠️ succeeded — same admin bypass |
+| Merge without approval via API | ⚠️ succeeded ("Pull Request successfully merged", PR #2) — admin bypass covers merges too; the 1-approval requirement is unsatisfiable solo (self-approval blocked) |
+
+**Lessons for dohping's first publish (all in §4):**
+1. GitHub repo-creation LICENSE/README seed = root commit on main; a
+   separately-rooted publish branch CANNOT PR (422). Fetch + rebase onto
+   origin/main before opening the PR.
+2. Keep the seed's files on conflict where sensible; on LICENSE the user
+   chose the OWNER-PATH holder (`github.com/neutralvibes`, no protocol) →
+   the first rebase WILL conflict on LICENSE: keep ours over the seed's
+   plain form.
+3. Squash-merge makes main read as one versioned commit per PR — user chose
+   it here; CONFIRMED 2026-08-19 as dohping's merge policy.
+4. Release assets upload fine via `uploads.github.com` with the fine-grained
+   token; plain names work (no Windows-style rename server-side).
+5. Amend-first is verified safe: `--amend --reset-author` rewrites both
+   identities before anything is pushed.
+6. **Protection mechanism = RULESETS, not classic branch protection.**
+   Both repos run rulesets whose bypass list names "Admin role,
+   bypass_mode: always". REFINED MODEL (2026-08-19, after user challenge):
+   **bypass ≠ admin.** The token has NO Administration permission (admin
+   APIs 403) — it is not admin-capable. But GitHub resolves the token's
+   actor as the repo-admin role for ENFORCEMENT (repo API reports
+   `permissions.admin: True`; rulesets report `current_user_can_bypass:
+   always`), so it auto-bypasses the rulesets — push-time rules
+   (pull_request, non_fast_forward) are not enforced against it, with only
+   a warning. Verification tool: GET /rulesets/{id} →
+   `current_user_can_bypass`. Configs verified 2026-08-19:
+   - repotest "test rule" (active): deletion, non_fast_forward,
+     pull_request with required_approving_review_count=**0** → merges need
+     no approval for anyone (that alone explains the unapproved merge).
+   - dohping "main" (active): deletion, non_fast_forward, pull_request
+     with required_approving_review_count=**1** + dismiss-stale-reviews;
+     allowed_merge_methods incl. squash. Matches the intended config.
+7. **Protection guards contributors, not the owner's token.** For non-admin
+   contributors the rulesets are fully enforced (PR + 1 approval, no
+   force-push, no delete); the agent's token bypasses (Admin-role bypass
+   actor). LEVER: removing "Admin role" from the bypass list makes the
+   ruleset bind the token too — but binds the owner as well; on a solo
+   repo with count=1 and self-approval blocked, the owner can deadlock
+   merging their own PRs. The real protection for dohping main stays
+   procedural: agent never pushes/merges main (documented flow), pre-commit
+   identity hook, user oversight. Keep count=1 as a future contributor
+   gate — user's call (2026-08-19).
+8. **Bypass removal EXECUTED + PROVEN on repotest (2026-08-19). FINAL
+   CONFIG = Admin bypass "For pull requests only"** (bypass_mode:
+   `pull_request`; `current_user_can_bypass: pull_requests_only`). Full
+   matrix, all proven behaviorally on repotest:
+   - bypass "always" (original): force-push, direct push, unapproved merge
+     ALL allowed (warning only)
+   - bypass none + count=1: all three REJECTED — but the owner deadlocks on
+     their own PRs (self-approval blocked → disable/merge/re-enable dance)
+   - **bypass "pull_request" + count=1 (FINAL):** force-push REJECTED,
+     direct push REJECTED, owner's own PR merges ALLOWED (no dance);
+     non-admin contributors still gated by count=1. The push layer is
+     mechanically enforced; merge authority is procedural (the admin PR
+     bypass covers the token too — accepted residual).
+   The token CANNOT edit rulesets (PUT /rulesets → 403) — the escape hatch
+   is exclusively the user's. Ruleset conditions = `~DEFAULT_BRANCH` only →
+   feature-branch pushes (incl. the first-publish branch) unaffected.
+   dohping action pending: switch its Admin bypass from "always" to
+   "for pull requests only" (same as repotest).

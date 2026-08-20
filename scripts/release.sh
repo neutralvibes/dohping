@@ -9,6 +9,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-dist}"
+
+# The quality gate runs first — a red gate refuses to build a release.
+# (gofmt, vet, race tests, gosec + the other analyzers when installed.)
+"$ROOT/scripts/check.sh"
+
 VERSION="${DOHPING_VERSION:-$(grep -m1 'Version = ' "$ROOT/internal/version/version.go" | sed -E 's/.*"([^"]+)".*/\1/')}"
 GOROOT_BIN="${GOROOT:-$(go env GOROOT)}/bin"
 

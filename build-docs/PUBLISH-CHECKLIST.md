@@ -5,7 +5,11 @@ It grows over time — add items when we learn what matters.
 
 ## Hard gates (mechanical — enforced, not optional)
 
-- [ ] publish/ derived by `bash scripts/publish-github.sh` from a CLEAN
+- [ ] CI workflow present in the pushed branch:
+      `git -C publish ls-files .github/workflows/ci.yml` → present
+- [ ] CI is GREEN on the PR before merge (gate + gate-windows jobs); a red
+      CI is a merge blocker
+- [ ] `publish/` derived by `bash scripts/publish-github.sh` from a CLEAN
       private tree; the script's own assertions passed (forbidden-file scan,
       exact public file list)
 - [ ] `publish/` pre-commit hook is active (refuses commits whose author is
@@ -26,7 +30,12 @@ It grows over time — add items when we learn what matters.
       - release commits are version-driven ("Initial release", "v0.1.0",
         "v0.1.1: fix window-mode resize reclaim")
       - when in doubt: write it as the user would type it, then halve it
-- [ ] Releases are tagged (annotated v0.1.0, ...) — untagged releases are a tell
+- [ ] Releases are tagged — annotated tag (v0.1.0, ...) on every RELEASE, not
+      on every push/publish; untagged releases are a tell
+- [ ] Release assets are plain-named (`dohping-<os>-<arch>`); the build sha
+      lives in the release notes + SHA256SUMS, never in public asset
+      filenames — sha-prefixed names are rig/local-testing only
+      (decided 2026-08-19)
 - [ ] LICENSE holder line filled (first publish only)
 - [ ] PR opened; description lists exactly what's inside; user reviews the
       diff and merges. The agent never merges anything.
@@ -35,8 +44,10 @@ It grows over time — add items when we learn what matters.
 
 - [ ] PUBLISH-LOG.md appended: date · publish commit · private sha · version
 
-## OPEN DECISIONS — parked 2026-08-18 (user decides fresh, NOT the agent)
+## DECISIONS — all resolved 2026-08-19
 
-- [ ] First-commit wording: "Initial release" + tag v0.1.0, or the message
-      itself is "v0.1.0"?
-- [ ] Annotated version tags on every publish — yes/no?
+- First-commit wording: **"Initial release"** + annotated tag **v0.1.0**.
+- Merge policy: **squash** (user chose it on the repotest rehearsal).
+- Tags: annotated, per RELEASE (not per publish).
+- Release assets plain-named; the build sha only in release notes/SHA256SUMS.
+- LICENSE holder: **`github.com/neutralvibes`** (owner-path form, no protocol).
