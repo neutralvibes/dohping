@@ -7,6 +7,14 @@ terminal display, instead of an endless scroll of per-packet lines.
 Built for short interactive sessions (minutes to a few days), not
 long-term monitoring.
 
+- **Stateful, not noisy** — one line per status period, live-updating in
+  place, finalized into history on change.
+- **Two views** — plain line mode (default) and a fixed window dashboard.
+- **No privileges required** — ICMP via three tiers (raw socket → ping
+  socket → system `ping`), or plain TCP connect.
+- **Resize-aware** — repaints in place; reflowing terminals are handled
+  without fighting them.
+
 ## Installation
 
 ### From source
@@ -19,7 +27,8 @@ go build -o dohping ./cmd/dohping
 
 ### Release binaries
 
-Build all supported targets reproducibly and generate checksums:
+Build all supported targets (linux/darwin/windows × amd64/arm64)
+reproducibly and generate checksums:
 
 ```sh
 ./scripts/release.sh dist
@@ -39,36 +48,132 @@ The default ICMP probe tries, in order:
 The first tier that works is used; IPv6 targets use ICMPv6 (the ping
 fallback passes `-6`). When every tier is unavailable, `dohping` reports a
 clear permission error with a hint and exits with code `3` — it never
-misreports a permission problem as a host being down, and it aborts as
-soon as a probe reports a privilege problem rather than repeating error
-lines. Note that the ping
+misreports a permission problem as a host being down. Note that the ping
 fallback's output parser is Linux-iputils-oriented; platforms where the
 socket tiers work (macOS unprivileged ICMP, Linux with `CAP_NET_RAW`)
 never reach it. Use `--probe tcp` to probe with no ICMP dependency at all
 (e.g. `--probe tcp 443`, default port `443`).
 
-## Usage
-
-```text
-dohping [options] HOST
-```
-
-Flags may appear before or after `HOST` (e.g. `dohping google.com -c 5`).
-`-i`/`-t` accept a bare number of seconds (`-i 5` = 5s, like ping) or a
-duration (`-t 500ms`).
+## Quick start
 
 ```sh
 dohping 192.168.1.23              # default: ICMP, plain line mode
+dohping example.com -c 5          # 5 probes, then exit 0 (scripted)
 dohping --probe tcp example.com   # TCP connect probe, no privileges
-dohping --window-lines 8 host     # compact dashboard window
-dohping -q -l events.log host     # quiet + append status events to a log
-dohping -c 5 host                 # scripted: exactly 5 probes, exit 0
+dohping --window example.com      # fixed dashboard window
+dohping --window-lines 8 example.com   # taller dashboard
+dohping -q -l events.log example.com   # quiet + append events to a log
+```
+
+## Options
+
+```
+Usage:
+  dohping [options] HOST
+
+Flags may appear before or after HOST (e.g. `dohping HOST -c 5`).
+
+Probe a single host and display its status as a compact, stateful view:
+current status, how long it has held, and RTT statistics — instead of an
+endless scroll of per-packet lines.
+
+Options:
+  -h, --help                 Show this help and exit
+  -V, --version              Show version information and exit
+  -i, --interval TIME        Probe interval: seconds (e.g. 5) or a
+                             duration (e.g. 500ms, 1m30s) (default 1s)
+  -t, --timeout TIME         Probe timeout: seconds (e.g. 5) or a
+                             duration (e.g. 500ms, 1m30s) (default 2s)
+  -c, --count N              Stop after N probes (default: unlimited)
+  -p, --probe TYPE           Probe type: icmp | tcp[:PORT]
+                             (default icmp; tcp port default 443)
+  -d, --down-after N         Consecutive failures before status flips to
+                             down (default 1)
+  -u, --up-after N           Consecutive successes before status flips to
+                             up (default 1)
+
+Display:
+  -q, --quiet                Suppress display output (logging still works)
+      --no-header            Do not print the column header
+      --no-color             Disable color output
+      --color MODE           Color mode: auto, always, never (default auto)
+      --live MODE            Live updates: auto, on, off (default auto)
+      --no-live              Disable live updating
+  -w, --window               Use fixed auto-scrolling window mode
+      --no-window            Disable window mode (conflicts with
+                             --window-lines)
+      --window-lines N       Number of visible lines in window mode.
+                             Implies --window. (default 10)
+      --timestamp-format F   Display timestamp format: HH:MM:SS | rfc3339
+                             (default HH:MM:SS)
+
+Logging:
+  -l, --log-file PATH        Append finalized status events to PATH
+      --log-format FORMAT    Log format: text | json (default text)
+
+Exit codes:
+  0    normal completion (--count exhausted or interactive q quit)
+  1    general error
+  2    usage or configuration error
+  3    probe initialization or permission error
+  130  interrupted by SIGINT (Ctrl-C; Unix)
+  143  terminated by SIGTERM (Unix)
 ```
 
 Timing model: the first probe fires immediately, then probes start one
 `--interval` apart — so `-c 5 -i 1` completes in about 4 seconds
 (5 probes, 4 gaps), exactly like `ping -c 5 -i 1`. The summary's
 `run duration` is measured wall-clock time, not `count × interval`.
+
+## Examples
+
+### Watch a host until you interrupt it
+
+```sh
+dohping 192.168.1.23
+```
+
+ICMP probe every second, plain line mode. The live line updates in place;
+`q` quits cleanly (exit 0), `Ctrl-C` also quits (exit 130).
+
+### Scripted check — 5 probes
+
+```sh
+dohping -c 5 example.com; echo "exit: $?"
+```
+
+Runs 5 probes at 1s intervals (~4s wall time), prints the finalized lines
+and a summary, exits 0. In a script or cron, `--quiet --no-color` gives
+clean, parseable output.
+
+### TCP probe, no privileges
+
+```sh
+dohping --probe tcp example.com        # port 443
+dohping --probe tcp:22 example.com     # explicit port
+```
+
+Connection established *or refused* means up; a SYN that silently times
+out means down; DNS/routing failure is an error (exit 3, not a false
+"down").
+
+### Dashboard window
+
+```sh
+dohping --window --window-lines 8 example.com
+```
+
+A fixed, auto-scrolling dashboard drawn in place on the normal terminal.
+Resize it while it runs — it repaints in place.
+
+### Log to a file, watch nothing
+
+```sh
+dohping -q -l events.log -i 5 example.com
+```
+
+Quiet display, but every status change is appended to `events.log` (text
+or `--log-format json`), fsync'd, 0600.
 
 ## Display modes
 
@@ -155,9 +260,9 @@ columns and widen the line.
 ## Logging
 
 `--log-file PATH` appends one line per finalized status event (append-only,
-never overwritten, no ANSI). `--log-format text|json` selects the format
-(default `text`). Logging is independent of `--quiet` and is fsync'd after
-every event. IPv6 hosts are bracketed (`[::1]`).
+never overwritten, no ANSI, fsync'd, 0600). `--log-format text|json`
+selects the format (default `text`). Logging is independent of `--quiet`.
+IPv6 hosts are bracketed (`[::1]`).
 
 ```text
 2026-08-16T11:00:35+01:00 host=192.168.1.23 status=up duration_seconds=2126 min_ms=1.70 max_ms=5.90 avg_ms=2.70 fails=0
@@ -249,15 +354,14 @@ probe takes up to `--timeout`, so with `--down-after N` a host flips to
 ## Development
 
 ```sh
-go build ./...      # build
-go vet ./...        # static checks
-go test -race ./... # tests with the race detector
-gofmt -l .          # formatting (must be empty)
-staticcheck ./...   # static analysis
-govulncheck ./...   # vulnerability scan (dependency tree)
+bash scripts/check.sh          # full gate: gofmt, vet, race tests,
+                               # golangci-lint, staticcheck, gosec, govulncheck
+bash scripts/release.sh        # reproducible cross-compiled binaries + SHA256SUMS
+python3 scripts/pty-resize-probe.py   # real-PTY resize scenarios (see header)
 ```
 
-Release builds: `bash scripts/release.sh` — reproducible cross-compiled
-binaries + `SHA256SUMS` into `dist/`. Terminal-output integration tests:
-`python3 scripts/pty-resize-probe.py` against a fresh build (see the script's
-header for scenarios).
+`scripts/check.sh` is the one definition of "green" — run locally, run by
+CI, and run first by `release.sh` (a red gate refuses to build). CI
+(GitHub Actions, `.github/workflows/ci.yml`) runs the same gate plus the
+PTY probe scenarios and the release matrix on every push to `main` and
+every pull request.
