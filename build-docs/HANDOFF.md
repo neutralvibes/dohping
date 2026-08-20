@@ -170,6 +170,12 @@ Full per-fix history: DECISIONS.md (78 entries, each with rationale).
     settings.
   - Reusable rig generalization (pty-probe.py, §10) REMAINS HELD — dohping
     CI uses the dohping-specific probe as-is.
+  - **Debug facility is BUILD-TAGGED (2026-08-19):** debugx real impl +
+    its forensics tests live only under `-tags debug`; release builds ship
+    an inert stub (debugx_stub.go — DOHPING_DEBUG ignored, nothing can
+    enable logging). CI has a dedicated step asserting a release binary
+    writes no debug log; check.sh tests BOTH paths (`go test -race ./...`
+    + `-tags debug`). Debug binary: `go build -tags debug`. README updated.
 
 - **dohping setup finalisation (from repotest lessons, 2026-08-19) —
  checklist, user-paced** (user: one thing at a time; they'll be clear
