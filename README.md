@@ -274,6 +274,19 @@ IPv6 hosts are bracketed (`[::1]`).
 
 ## Debug logging
 
+The debug facility is **compiled in only when the binary is built with
+`-tags debug`** — release builds do not contain it at all. A release
+binary ignores `DOHPING_DEBUG` (no file, no warning); CI verifies this on
+every build. This keeps diagnostics out of shipped binaries by
+construction, not by convention.
+
+To build a debug binary:
+
+```sh
+go build -tags debug -o dohping-debug ./cmd/dohping
+DOHPING_DEBUG=/tmp/dohping-debug.log ./dohping-debug --window HOST
+```
+
 `DOHPING_DEBUG=PATH` enables an optional diagnostic log appended to PATH
 (created 0600, same permissions as `--log-file`; a path that cannot be
 opened disables the facility with a warning — diagnostics never break a

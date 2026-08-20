@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"dohping/internal/debugx"
 	"dohping/internal/state"
 )
 
@@ -712,33 +711,5 @@ func TestDisplayNonLiveStaysEscapeFree(t *testing.T) {
 }
 
 // TestDisplayResizeDebugForensics: the plain display's resize observation
-// logs through the debug facility (DECISIONS #74) — the width change and
-// the settle restart — so a resize episode in plain mode is fully
-// reconstructable from the app's own log, the same way window mode is.
-func TestDisplayResizeDebugForensics(t *testing.T) {
-	var dbg strings.Builder
-	debugx.SetWriter(&dbg)
-	defer debugx.SetWriter(nil)
-
-	var buf bytes.Buffer
-	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 60, 24)
-	*wPtr = 60
-	d.Handle(changeEvent(t0, state.StatusUp))
-	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
-		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
-	dbg.Reset()
-
-	*wPtr = 55
-	*now = now.Add(100 * time.Millisecond) // mid-reflow: nothing written
-	d.Tick()
-	*now = now.Add(time.Second) // width stable: fresh row below the frozen line
-	d.Tick()
-
-	log := dbg.String()
-	if !strings.Contains(log, "plain 60→55") || !strings.Contains(log, "freeze") {
-		t.Errorf("plain resize change not logged: %q", log)
-	}
-	if !strings.Contains(log, "settled") {
-		t.Errorf("plain settle restart not logged: %q", log)
-	}
-}
+// (The display-resize debug-forensics test moved to forensics_debug_test.go
+// — it asserts on debugx output and lives under -tags debug.)

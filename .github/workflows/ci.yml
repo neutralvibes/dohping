@@ -53,6 +53,23 @@ jobs:
           rm -f /tmp/dohping-test
           go build -o /tmp/dohping-test ./cmd/dohping
 
+      - name: Debug facility is compiled OUT of release builds
+        run: |
+          # Release build (no -tags debug): DOHPING_DEBUG must be inert —
+          # no file created, no warning, exit unaffected. If the stub
+          # leaks or a future refactor ships the real debugx, this fails.
+          rm -f /tmp/dohping-debug-probe.log
+          DOHPING_DEBUG=/tmp/dohping-debug-probe.log /tmp/dohping-test --version >/dev/null 2>/tmp/dohping-debug-probe.err || { cat /tmp/dohping-debug-probe.err; exit 1; }
+          if [ -e /tmp/dohping-debug-probe.log ]; then
+            echo "FAIL: release build wrote a debug log (debug facility leaked in)" >&2
+            exit 1
+          fi
+          if grep -q "debug" /tmp/dohping-debug-probe.err 2>/dev/null; then
+            echo "FAIL: release build printed a debug warning (facility leaked in)" >&2
+            exit 1
+          fi
+          echo "PASS: release build has no debug facility"
+
       - name: Real-PTY probe scenarios
         run: |
           for s in window window-same-band window-subfloor plain; do
