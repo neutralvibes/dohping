@@ -1,0 +1,74 @@
+# CI for dohping — one definition of green.
+#
+# gate (linux): gofmt, vet, race tests, gosec, real-PTY probe scenarios
+#   (TCP mode — no ICMP caps on runners), release matrix + SHA256SUMS.
+# gate-windows: unit tests + vet only (probe is POSIX; the emulator-grid
+#   unit tests cover the platform matrix).
+#
+# gosec is installed from the prebuilt release tarball — NEVER
+# `go install gosec@latest` (compiles the LLM-SDK deps; DECISIONS #63).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    name: Gate (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install gosec (prebuilt tarball)
+        run: |
+          curl -sSfL -o gosec.tgz https://github.com/securego/gosec/releases/download/v2.28.0/gosec_2.28.0_linux_amd64.tar.gz
+          tar xzf gosec.tgz
+          mv gosec /usr/local/bin/
+          gosec -version
+
+      - name: Quality gate (gofmt, vet, race, gosec)
+        run: bash scripts/check.sh
+
+      - name: Fresh build (stale-build trap)
+        run: |
+          rm -f /tmp/dohping-test
+          go build -o /tmp/dohping-test ./cmd/dohping
+
+      - name: Real-PTY probe scenarios
+        run: |
+          for s in window window-same-band window-subfloor plain; do
+            python3 scripts/pty-resize-probe.py "$s"
+          done
+
+      - name: Release matrix + checksums
+        run: bash scripts/release.sh
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: dohping-binaries
+          path: dist/
+
+  gate-windows:
+    name: Gate (windows, unit only)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (unit only — probe is POSIX, race not run on Windows)
+        run: go test ./...
