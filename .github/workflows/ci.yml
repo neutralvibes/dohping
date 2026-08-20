@@ -33,7 +33,19 @@ jobs:
           mv gosec /usr/local/bin/
           gosec -version
 
-      - name: Quality gate (gofmt, vet, race, gosec)
+      - name: Install golangci-lint (prebuilt tarball)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v1.64.8
+          golangci-lint --version
+
+      - name: Install staticcheck (standalone, authoritative)
+        run: |
+          curl -sSfL -o staticcheck.tar.gz https://github.com/dominikh/go-tools/releases/download/2026.2/staticcheck_linux_amd64.tar.gz
+          tar xzf staticcheck.tar.gz
+          mv staticcheck/staticcheck /usr/local/bin/
+          staticcheck -version
+
+      - name: Quality gate (gofmt, vet, race, golangci-lint, staticcheck, gosec)
         run: bash scripts/check.sh
 
       - name: Fresh build (stale-build trap)

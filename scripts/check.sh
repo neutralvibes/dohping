@@ -47,7 +47,12 @@ run "go vet" go vet ./...
 run "go test -race" go test -race -count=1 ./...
 
 # Static analyzers — SKIP (not FAIL) when absent so stock CI runners with
-# only the pre-installed gosec still get a meaningful green.
+# only the pre-installed tools still get a meaningful green.
+# golangci-lint (broad style/correctness sweep) and staticcheck (deep
+# analysis) are complementary, NOT redundant: golangci-lint's bundled
+# staticcheck is only a reimplementation of staticcheck's rules — the
+# standalone binary is the authoritative tool (its author explicitly does
+# not support the bundled reimplementation). Both run; CI installs both.
 for tool in golangci-lint staticcheck gosec govulncheck; do
   if command -v "$tool" >/dev/null 2>&1; then
     case "$tool" in
