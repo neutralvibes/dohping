@@ -123,33 +123,29 @@ Full per-fix history: DECISIONS.md (78 entries, each with rationale).
 
 ## 4. Pending / next actions
 
-- **Publish-prep TODO (user-flagged 2026-08-18):** GitHub no-reply identity
-  OBTAINED 2026-08-19: `26578830+neutralvibes@users.noreply.github.com`
-  (ID 26578830 verified via api.github.com). Public commits must read as the
-  project owner — zero agent trace. **ON USER'S EXPLICIT GO — do not run
- anything before that (2026-08-19):** set `git -C publish config user.name`
- (neutralvibes) / `user.email`; **amend the baseline snapshot commit
- `fefce20`** (still "Hermes Agent <hermes@hermes.home>"; nothing pushed yet,
- so the rewrite is free — `--amend --reset-author` resets BOTH author and
- committer; proven on repotest 2026-08-19); then **fetch origin/main FIRST
- and rebase the publish branch onto it** — dohping's GitHub main is seeded
- (`bf528a7` "Initial commit", LICENSE only, holder "neutralvibes"), and a
- separately-rooted branch cannot PR (API 422 "no history in common";
- proven on repotest 2026-08-19); the private LICENSE holder is DONE
- (filled `github.com/neutralvibes` 2026-08-19 — the derive script copies
- it, nothing to mirror at go time); then derive
- publish/, push the branch, open the PR. Resolved
- 2026-08-19: annotated tags per RELEASE (not per publish); GitHub release
- assets plain-named `dohping-<os>-<arch>` with the build sha in release
- notes + SHA256SUMS — sha-prefixed filenames stay rig/local-testing only;
- user squash-merged the rehearsal PR — squash CONFIRMED as dohping merge
- policy (2026-08-19). ALL DECISIONS RESOLVED 2026-08-19: first-commit
- wording "Initial release" + tag v0.1.0; LICENSE holder =
- `github.com/neutralvibes` (owner-path form, NO protocol — user's pick,
- 2026-08-19; the GitHub seed says plain "neutralvibes", so the rebase
- WILL conflict on LICENSE → keep ours). The publish sequence
- is fully specified — awaiting the user's single "go". See
- build-docs/PUBLISH-CHECKLIST.md.
+- **Publish sequence — EXECUTED up to the push gate (2026-08-19, user "Go"):**
+  - DONE: identity set (`neutralvibes` / `26578830+neutralvibes@users.noreply.github.com`);
+    baseline snapshot amended (`--amend --reset-author`) from `fefce20`
+    (Hermes Agent) → `88f887d` "Initial release" (user identity, author
+    AND committer); rebased onto `origin/main` (`bf528a7` "Initial commit");
+    LICENSE conflict resolved KEEPING OURS (`github.com/neutralvibes` —
+    the earlier `git checkout --ours` grabbed the seed's plain
+    "neutralvibes"; fixed with sed before the amend); commit message
+    reworded per checklist ("Initial release", no process metadata);
+    publish branch `publish-initial` created from the amended master.
+  - **BLOCKED: `git push` → `refusing to allow a Personal Access Token to
+    create or update workflow .github/workflows/ci.yml without workflow
+    scope`.** The token lacks the Workflows permission — GitHub refuses
+    the push SERVER-SIDE; no agent workaround. **User action: fine-grained
+    token → Repository permissions → Workflows: Read and write on dohping,
+    save.** Then resume: `git -C publish push -u origin publish-initial`
+    → open PR (squash policy) → CI's first real run → tag v0.1.0 + release
+    with plain assets + SHA256SUMS.
+  - Previous state (for the record): identity TODO from 2026-08-18;
+    decisions all resolved 2026-08-19 (first-commit "Initial release",
+    tag v0.1.0, LICENSE holder `github.com/neutralvibes`, squash policy,
+    plain asset names). The rebase WILL conflict on LICENSE — keep ours
+    (now proven).
 
  - **CI un-held and BUILT (2026-08-19, user: "CI tests must be setup to run"):**
   - `.github/workflows/ci.yml` (tracked in the PRIVATE repo; added to
