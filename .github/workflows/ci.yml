@@ -1,0 +1,124 @@
+# CI for dohping — one definition of green.
+#
+# gate (linux): gofmt, vet, race tests, gosec, real-PTY probe scenarios
+#   (TCP mode — no ICMP caps on runners), release matrix + SHA256SUMS.
+# gate-windows: unit tests + vet only (probe is POSIX; the emulator-grid
+#   unit tests cover the platform matrix).
+#
+# gosec is installed from the prebuilt release tarball — never from
+# `go install` (its LLM-scan feature pulls heavy SDK dependencies).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    name: Gate (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install gosec (prebuilt tarball)
+        run: |
+          curl -sSfL -o gosec.tgz https://github.com/securego/gosec/releases/download/v2.28.0/gosec_2.28.0_linux_amd64.tar.gz
+          tar xzf gosec.tgz
+          mv gosec /usr/local/bin/
+          gosec -version
+
+      - name: Install golangci-lint (prebuilt tarball)
+        run: |
+          # Verify the tarball against the published checksums before
+          # extracting — the installer's own verify can race the release
+          # asset/checksum mirrors and fail spuriously.
+          GL_VER=v2.13.1
+          GL_FILE=golangci-lint-${GL_VER#v}-linux-amd64.tar.gz
+          curl -sSfL -o "$GL_FILE" https://github.com/golangci/golangci-lint/releases/download/$GL_VER/$GL_FILE
+          curl -sSfL -o gl-checksums.txt https://github.com/golangci/golangci-lint/releases/download/$GL_VER/golangci-lint-${GL_VER#v}-checksums.txt
+          grep " $GL_FILE\$" gl-checksums.txt | sha256sum -c --ignore-missing -
+          tar xzf "$GL_FILE"
+          mv golangci-lint-${GL_VER#v}-linux-amd64/golangci-lint /usr/local/bin/
+          golangci-lint --version
+
+      - name: Install staticcheck (standalone, authoritative)
+        run: |
+          curl -sSfL -o staticcheck.tar.gz https://github.com/dominikh/go-tools/releases/download/2026.2/staticcheck_linux_amd64.tar.gz
+          tar xzf staticcheck.tar.gz
+          mv staticcheck/staticcheck /usr/local/bin/
+          staticcheck -version
+
+      - name: Quality gate (gofmt, vet, race, debug build, analyzers)
+        run: |
+          set -uo pipefail
+          # The project's green definition: gofmt, vet, race tests (both the
+          # release and the debug-tagged build), then the static analyzers.
+          gofmt_files="$(git ls-files '*.go')"
+          test -z "$(gofmt -l $gofmt_files)"
+          go vet ./...
+          go test -race -count=1 ./...
+          go vet -tags debug ./...
+          go test -race -count=1 -tags debug ./...
+          golangci-lint run
+          staticcheck ./...
+          gosec -quiet ./...
+
+      - name: Fresh build (stale-build trap)
+        run: |
+          rm -f /tmp/dohping-test
+          go build -o /tmp/dohping-test ./cmd/dohping
+
+      - name: Debug facility is compiled OUT of release builds
+        run: |
+          # Release build (no -tags debug): DOHPING_DEBUG must be inert —
+          # no file created, no warning, exit unaffected. If the stub
+          # leaks or a future refactor ships the real debugx, this fails.
+          rm -f /tmp/dohping-debug-probe.log
+          DOHPING_DEBUG=/tmp/dohping-debug-probe.log /tmp/dohping-test --version >/dev/null 2>/tmp/dohping-debug-probe.err || { cat /tmp/dohping-debug-probe.err; exit 1; }
+          if [ -e /tmp/dohping-debug-probe.log ]; then
+            echo "FAIL: release build wrote a debug log (debug facility leaked in)" >&2
+            exit 1
+          fi
+          if grep -q "debug" /tmp/dohping-debug-probe.err 2>/dev/null; then
+            echo "FAIL: release build printed a debug warning (facility leaked in)" >&2
+            exit 1
+          fi
+          echo "PASS: release build has no debug facility"
+
+      - name: Real-PTY probe scenarios
+        run: |
+          for s in window window-same-band window-subfloor plain; do
+            python3 scripts/pty-resize-probe.py "$s"
+          done
+
+      - name: Release matrix + checksums
+        run: bash scripts/release.sh
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: dohping-binaries
+          path: dist/
+
+  gate-windows:
+    name: Gate (windows, unit only)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (unit only — probe is POSIX, race not run on Windows)
+        run: go test ./...
