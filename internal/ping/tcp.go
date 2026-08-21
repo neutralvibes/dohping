@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"syscall"
 	"time"
 )
 
@@ -55,8 +54,9 @@ func classifyDialError(err error, rtt time.Duration) Result {
 	if errors.As(err, &ne) && ne.Timeout() {
 		return Result{Outcome: OutcomeDown}
 	}
-	// The host answered "no" — that proves it is alive.
-	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) {
+	// The host answered "no" — that proves it is alive. On POSIX this is
+	// ECONNREFUSED/ECONNRESET; Windows surfaces it as WSAECONNREFUSED.
+	if isRefused(err) {
 		return Result{Outcome: OutcomeUp, RTT: rtt}
 	}
 	// Cancellation during shutdown: the loop drops this result anyway.
