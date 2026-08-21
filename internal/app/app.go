@@ -74,18 +74,17 @@ const (
 	keyEOF                   // stdin closed
 )
 
-// cprEvent was removed with the DSR/CPR re-anchor machinery (DECISIONS
-// #67): ConPTY reports unreliable cursor positions on resize, so the
-// displays freeze-and-restart instead of querying the terminal.
+// cprEvent was removed with the DSR/CPR re-anchor machinery: ConPTY
+// reports unreliable cursor positions on resize, so the displays
+// freeze-and-restart instead of querying the terminal.
 
 // Main is the process entry point: parse args, dispatch, return exit code.
 // Stdout/stderr/tty are injected so tests can capture output.
 func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
-	// Optional diagnostic logger (DECISIONS #74): DOHPING_DEBUG=<path>
-	// enables the resize/redraw forensics file — the app's own record of
-	// the widths a resize drag passes through (no terminal displays
-	// them). File-only: the display owns the terminal, so debug output
-	// never goes there.
+	// Optional diagnostic logger: DOHPING_DEBUG=<path> enables the
+	// resize/redraw forensics file — the app's own record of the widths a
+	// resize drag passes through (no terminal displays them). File-only:
+	// the display owns the terminal, so debug output never goes there.
 	debugx.Init()
 	defer debugx.Close()
 
@@ -256,12 +255,10 @@ loop:
 			// Immediate repaint on terminal resize (Unix SIGWINCH fast
 			// path). Tick is the right repaint for both displays: Window
 			// redraws the block, Display refreshes the live line — both
-			// notice the width change and freeze/restart as needed
-			// (DECISIONS #67). On Windows the channel never fires — the
-			// 1-second tick covers resizes there (platform-split,
-			// DECISIONS #64/#65). Debug forensics (#74): whether ConPTY
-			// → WSL2 even delivers SIGWINCH is itself a fact the log
-			// must record.
+			// notice the width change and freeze/restart as needed. On
+			// Windows the channel never fires — the 1-second tick covers
+			// resizes there. Debug forensics: whether ConPTY → WSL2 even
+			// delivers SIGWINCH is itself a fact the log must record.
 			debugx.Debugf("winch", "SIGWINCH received → repaint")
 			disp.Tick()
 		case <-tickCh:
@@ -391,9 +388,8 @@ func logFinal(l *logx.Logger, host string, eng *state.Engine) {
 // Every line is \r-prefixed AND \r\n-terminated: after Finalize the
 // cursor may sit anywhere (live mode ends mid-line on terminals without
 // ONLCR), so each line explicitly resets to column 0 before writing and
-// lands at column 0 of the next line after (DECISIONS #54 lesson, user
-// report 2026-08-17 — the summary previously drifted progressively
-// right until the terminal wrapped).
+// lands at column 0 of the next line after (the summary previously
+// drifted progressively right until the terminal wrapped).
 func printSummary(w io.Writer, host string, eng *state.Engine, runDuration time.Duration) {
 	probes, ok, fail := eng.Totals()
 	loss := 0.0

@@ -5,21 +5,20 @@ Scenarios (argv[1]):
   window (default): spawns dohping --window in a 60x24 pty, resizes the pty
     to 100x24 mid-run (SIGWINCH + TIOCSWINSZ), renders the capture through
     a VT emulator and prints the visible screen — proves the block repaints
-    IN PLACE across the resize: with column trimming (DECISIONS #71) the
-    line never wraps at these widths, so the reflow cannot move it and
-    exactly ONE block remains on screen (no frozen duplicate).
+    IN PLACE across the resize: with column trimming the line never wraps
+    at these widths, so the reflow cannot move it and exactly ONE block
+    remains on screen (no frozen duplicate).
   window-subfloor: same setup but 50x24 → 40x24 mid-run — a width change
     INTO the below-floor wrap zone (the line fits one row at 50, wraps at
     40): the fresh frame itself wraps at the settled width, so the block
     FREEZES and restarts on a fresh row below the frozen rendering — the
-    reclaim's below-floor fallback (SPEC-window-resize-reclaim.md: two
-    blocks).
+    reclaim's below-floor fallback (two blocks).
   window-same-band: 60 → 55 mid-run — both widths keep the trimmed line in
-    one row; repaints in place, one block (DECISIONS #70).
+    one row; repaints in place, one block.
   plain: spawns PLAIN live mode in a fixed 60x24 pty (below the 81-cell
     minimum, so every line wraps) and asserts the live line stays anchored
-    across many redraws — the pre-#65 code walked it DOWN one row per
-    redraw, leaving stale fragments.
+    across many redraws — earlier code walked it down one row per redraw,
+    leaving stale fragments.
 
 Run against a FRESH build (rm -f the binary first — stale-build trap):
   python3 scripts/pty-resize-probe.py [window|plain]
@@ -179,7 +178,7 @@ def main():
     if mode == "window-same-band":
         # 60 → 55 mid-run: same wrap band (12 physical rows at both
         # widths), so the block must repaint in place — exactly ONE header
-        # on the final screen, no frozen duplicate (DECISIONS #70).
+        # on the final screen, no frozen duplicate.
         scr = TermScreen(rows, 60)
         buf, code = capture(["--window"] + common, 60, rows, scr, resize_to=55)
         print("=== visible screen at final width (55 cols) ===")
@@ -219,7 +218,7 @@ def main():
         # (below the essentials floor) — the fresh frame itself wraps at
         # the settled width, so the block FREEZES then restarts below the
         # frozen rendering: the reclaim's below-floor fallback
-        # (SPEC-window-resize-reclaim.md; two blocks on screen).
+        # (two blocks on screen).
         scr = TermScreen(rows, 50)
         buf, code = capture(["--window"] + common, 50, rows, scr, resize_to=40)
         print("=== visible screen at final width (40 cols) ===")
@@ -234,7 +233,7 @@ def main():
         return
 
     # window mode: 60 → 100 mid-run. The line is trimmed to fit at 60
-    # (DECISIONS #71) and never wraps at either width, so the reflow cannot
+    # and never wraps at either width, so the reflow cannot
     # move the block: it must repaint IN PLACE — exactly ONE block on the
     # final screen (no frozen duplicate).
     scr = TermScreen(rows, 60)

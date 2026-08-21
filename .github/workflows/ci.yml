@@ -5,8 +5,8 @@
 # gate-windows: unit tests + vet only (probe is POSIX; the emulator-grid
 #   unit tests cover the platform matrix).
 #
-# gosec is installed from the prebuilt release tarball — NEVER
-# `go install gosec@latest` (compiles the LLM-SDK deps; DECISIONS #63).
+# gosec is installed from the prebuilt release tarball — never from
+# `go install` (its LLM-scan feature pulls heavy SDK dependencies).
 name: ci
 
 on:
@@ -48,7 +48,8 @@ jobs:
       - name: Quality gate (gofmt, vet, race, debug build, analyzers)
         run: |
           set -uo pipefail
-          # One definition of green — same checks as the private scripts/check.sh.
+          # The project's green definition: gofmt, vet, race tests (both the
+          # release and the debug-tagged build), then the static analyzers.
           gofmt_files="$(git ls-files '*.go')"
           test -z "$(gofmt -l $gofmt_files)"
           go vet ./...

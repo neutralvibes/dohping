@@ -1,8 +1,8 @@
 //go:build debug
 
-// Package debugx is the optional diagnostic logger (DECISIONS #74). It is
-// compiled OUT of release builds — this file exists only under `-tags
-// debug` (see debugx_stub.go for the inert release counterpart, and
+// Package debugx is the optional diagnostic logger. It is compiled OUT of
+// release builds — this file exists only under `-tags debug` (see
+// debugx_stub.go for the inert release counterpart, and
 // debugx_stub_test.go for the CI gate proving release binaries can't
 // write a debug log). A debug build is enabled by the DOHPING_DEBUG
 // environment variable (a file path) or in code via SetWriter. It exists

@@ -79,10 +79,9 @@ func TestMainConflict(t *testing.T) {
 	}
 }
 
-// noOnlcrScreen models a terminal that does NOT translate LF to CRLF (the
-// user's terminal — DECISIONS #54): \n moves down preserving the column,
-// only \r returns to column 0. This is the environment that exposed the
-// exit-summary drift (user report 2026-08-17).
+// noOnlcrScreen models a terminal that does NOT translate LF to CRLF:
+// \n moves down preserving the column, only \r returns to column 0. This
+// is the environment that exposed the exit-summary drift.
 type noOnlcrScreen struct {
 	rows, cols int
 	cells      [][]rune

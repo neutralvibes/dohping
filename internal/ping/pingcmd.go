@@ -22,8 +22,8 @@ var rttRe = regexp.MustCompile(`time[=<]\s*([0-9.]+)\s*ms`)
 
 // pingCmdProbe probes via the system ping command. It is the last tier of
 // the ICMP fallback chain, used when no ICMP socket is permitted (e.g.
-// restricted containers where /bin/ping is elevated by the sandbox but
-// the process has no CAP_NET_RAW and no ping-group coverage).
+// restricted containers where /bin/ping is elevated but the process has
+// no CAP_NET_RAW and no ping-group coverage).
 //
 // The output parser is Linux-iputils-oriented (time=N.NN ms); platforms
 // where the socket tiers work (macOS unprivileged ICMP, Linux with

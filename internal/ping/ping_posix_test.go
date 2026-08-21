@@ -11,8 +11,9 @@ import (
 )
 
 // Tests in this file exercise POSIX-specific behaviour:
-//   - the real `ping` command fallback (parser is Linux-iputils-oriented;
-//     Windows ping.exe output differs and is not parsed — HANDOFF §4)
+//   - the real `ping` command fallback (the output parser is
+//     Linux-iputils-oriented; Windows ping.exe output differs and is
+//     not parsed)
 //   - the ICMP tier model on POSIX (raw socket → ping socket → system ping)
 //
 // Windows runs only the platform-agnostic tests in ping_test.go /

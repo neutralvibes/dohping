@@ -29,14 +29,14 @@ type ICMPProbe struct {
 // error is operational (permission denied, unsupported network, DNS
 // failure) and must be reported as such — never as host-down.
 //
-// Three tiers are tried in order (DECISIONS #49):
+// Three tiers are tried in order:
 //
 //  1. privileged raw socket ("ip4:icmp"/"ip6:ipv6-icmp", CAP_NET_RAW on
 //     Linux),
 //  2. unprivileged ping socket ("udp4"/"udp6", governed by
 //     net.ipv4.ping_group_range),
-//  3. the system ping command (works where the sandbox elevates /bin/ping
-//     but our process holds no privileges).
+//  3. the system ping command (works in restricted environments where
+//     /bin/ping is elevated but the process holds no privileges).
 //
 // When every tier is unavailable, the error carries the socket permission
 // failure so callers can print helpful guidance.
