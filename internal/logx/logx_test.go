@@ -39,7 +39,7 @@ func TestOpenCreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("log file not created: %v", err)
 	}
@@ -58,14 +58,14 @@ func TestAppendNotTruncate(t *testing.T) {
 	if err := l.Log(upEntry()); err != nil {
 		t.Fatal(err)
 	}
-	l.Close()
+	_ = l.Close()
 
 	l2, _ := Open(path, "text", "192.168.1.23")
-	defer l2.Close()
+	defer func() { _ = l2.Close() }()
 	if err := l2.Log(downEntry()); err != nil {
 		t.Fatal(err)
 	}
-	l2.Close()
+	_ = l2.Close()
 
 	data, _ := os.ReadFile(path)
 	if strings.Count(string(data), "status=") != 2 {
@@ -145,7 +145,7 @@ func TestNoANSIInLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	if err := l.Log(upEntry()); err != nil {
 		t.Fatal(err)
 	}

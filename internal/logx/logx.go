@@ -97,12 +97,13 @@ func (l *Logger) jsonLine(e Entry) string {
 		Status:          e.Status.String(),
 		DurationSeconds: int64(e.Duration.Seconds()),
 	}
-	if e.Status == state.StatusUp {
+	switch e.Status {
+	case state.StatusUp:
 		m, x, a := ms2(e.Stats.Min), ms2(e.Stats.Max), ms2(e.Stats.Avg())
 		je.MinMS, je.MaxMS, je.AvgMS = &m, &x, &a
 		f := e.Fails
 		je.Fails = &f
-	} else if e.Status == state.StatusDown {
+	case state.StatusDown:
 		f := e.Fails
 		je.Fails = &f
 	}

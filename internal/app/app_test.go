@@ -108,7 +108,7 @@ func (s *noOnlcrScreen) feed(str string) {
 		case ch == '\x1b':
 			if i+1 < len(str) && str[i+1] == '[' {
 				j := i + 2
-				for j < len(str) && !(str[j] >= 0x40 && str[j] <= 0x7e) {
+				for j < len(str) && (str[j] < 0x40 || str[j] > 0x7e) {
 					j++
 				}
 				i = j + 1

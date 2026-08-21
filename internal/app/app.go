@@ -90,8 +90,8 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 
 	opts, action, err := cli.Parse(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "dohping: %v\n", err)
-		fmt.Fprintf(stderr, "run 'dohping --help' for usage\n")
+		_, _ = fmt.Fprintf(stderr, "dohping: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "run 'dohping --help' for usage\n")
 		return ExitUsage
 	}
 
@@ -100,7 +100,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		cli.WriteHelp(stdout)
 		return ExitOK
 	case cli.ActionVersion:
-		fmt.Fprintln(stdout, version.String())
+		_, _ = fmt.Fprintln(stdout, version.String())
 		return ExitOK
 	}
 
@@ -108,13 +108,13 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	// with guidance — never a host-down condition.
 	pr, err := buildProbe(opts)
 	if err != nil {
-		fmt.Fprintf(stderr, "dohping: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "dohping: %v\n", err)
 		if ping.IsPermissionError(err) {
-			fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary)")
+			_, _ = fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary)")
 		}
 		return ExitProbeInit
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	eng := state.New(opts.DownAfter, opts.UpAfter)
 
@@ -123,10 +123,10 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	if opts.LogFile != "" {
 		logger, err = logx.Open(opts.LogFile, opts.LogFormat, opts.Host)
 		if err != nil {
-			fmt.Fprintf(stderr, "dohping: unable to open log file %q: %v\n", opts.LogFile, err)
+			_, _ = fmt.Fprintf(stderr, "dohping: unable to open log file %q: %v\n", opts.LogFile, err)
 			return ExitError
 		}
-		defer logger.Close()
+		defer func() { _ = logger.Close() }()
 	}
 
 	colorEnabled := theme.Enabled(theme.Config{NoColor: opts.NoColor, ColorMode: opts.ColorMode},
@@ -141,7 +141,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	if tty.Stdin && tty.StdinFile != nil {
 		restore, kerr := startKeyReader(tty.StdinFile, keyCh)
 		if kerr != nil {
-			fmt.Fprintf(stderr, "dohping: warning: cannot configure interactive quit: %v\n", kerr)
+			_, _ = fmt.Fprintf(stderr, "dohping: warning: cannot configure interactive quit: %v\n", kerr)
 		} else {
 			defer restore()
 		}
@@ -167,7 +167,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		winchCh = c
 	} else {
 		if opts.Window && !opts.Quiet {
-			fmt.Fprintln(stderr, "dohping: warning: --window requires a terminal; falling back to plain line mode")
+			_, _ = fmt.Fprintln(stderr, "dohping: warning: --window requires a terminal; falling back to plain line mode")
 		}
 		disp = output.NewDisplay(stdout, layout, opts.Quiet, opts.NoHeader, live,
 			defaultSizeFn(stdout))
@@ -276,8 +276,8 @@ loop:
 	if reason == stopPerm {
 		// Permission problem: report with guidance, exit 3 — never a
 		// host-down condition, never an endless error state.
-		fmt.Fprintf(stderr, "dohping: %v\n", permErr)
-		fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary); on some systems the ping command itself needs privileges")
+		_, _ = fmt.Fprintf(stderr, "dohping: %v\n", permErr)
+		_, _ = fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary); on some systems the ping command itself needs privileges")
 		return ExitProbeInit
 	}
 	if !opts.Quiet && tty.Stdout {
@@ -396,14 +396,14 @@ func printSummary(w io.Writer, host string, eng *state.Engine, runDuration time.
 	if probes > 0 {
 		loss = float64(fail) / float64(probes) * 100
 	}
-	fmt.Fprintf(w, "\r--- dohping summary ---\r\n")
-	fmt.Fprintf(w, "\r%-16s %s\r\n", "host:", host)
-	fmt.Fprintf(w, "\r%-16s %s\r\n", "current status:", eng.Status())
-	fmt.Fprintf(w, "\r%-16s %s\r\n", "run duration:", formatRunDuration(runDuration))
-	fmt.Fprintf(w, "\r%-16s %d\r\n", "total probes:", probes)
-	fmt.Fprintf(w, "\r%-16s %d\r\n", "successful:", ok)
-	fmt.Fprintf(w, "\r%-16s %d\r\n", "failed:", fail)
-	fmt.Fprintf(w, "\r%-16s %.2f%%\r\n", "loss:", loss)
+	_, _ = fmt.Fprintf(w, "\r--- dohping summary ---\r\n")
+	_, _ = fmt.Fprintf(w, "\r%-16s %s\r\n", "host:", host)
+	_, _ = fmt.Fprintf(w, "\r%-16s %s\r\n", "current status:", eng.Status())
+	_, _ = fmt.Fprintf(w, "\r%-16s %s\r\n", "run duration:", formatRunDuration(runDuration))
+	_, _ = fmt.Fprintf(w, "\r%-16s %d\r\n", "total probes:", probes)
+	_, _ = fmt.Fprintf(w, "\r%-16s %d\r\n", "successful:", ok)
+	_, _ = fmt.Fprintf(w, "\r%-16s %d\r\n", "failed:", fail)
+	_, _ = fmt.Fprintf(w, "\r%-16s %.2f%%\r\n", "loss:", loss)
 }
 
 func formatRunDuration(d time.Duration) string {

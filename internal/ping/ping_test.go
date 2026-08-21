@@ -51,14 +51,14 @@ func TestTCPProbeEstablished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			c.Close()
+			_ = c.Close()
 		}
 	}()
 
@@ -66,7 +66,7 @@ func TestTCPProbeEstablished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeUp {
@@ -84,13 +84,13 @@ func TestTCPProbeRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
+	_ = ln.Close()
 
 	pr, err := NewTCPProbe("127.0.0.1", port, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeUp {
@@ -105,7 +105,7 @@ func TestTCPProbeTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeDown {
@@ -116,7 +116,7 @@ func TestTCPProbeTimeout(t *testing.T) {
 func TestTCPProbeDNSFailure(t *testing.T) {
 	pr, err := NewTCPProbe("nonexistent-host.invalid", 443, time.Second)
 	if err == nil {
-		pr.Close()
+		_ = pr.Close()
 		t.Fatal("NewTCPProbe succeeded, want DNS resolution error")
 	}
 	if !strings.Contains(err.Error(), "resolve") {
@@ -129,7 +129,7 @@ func TestTCPProbeCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()

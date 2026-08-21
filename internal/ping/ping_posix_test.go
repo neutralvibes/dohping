@@ -28,7 +28,7 @@ func TestICMPProbeLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewICMPProbe: %v", err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeUp {
@@ -47,7 +47,7 @@ func TestICMPFallbackEngagesPingCommand(t *testing.T) {
 	if err != nil {
 		t.Skipf("no ICMP tier available: %v", err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 	if _, ok := pr.(*pingCmdProbe); !ok {
 		// Raw or unprivileged socket tier engaged — even better.
 		t.Logf("socket tier engaged (%T); ping fallback not exercised", pr)
@@ -67,7 +67,7 @@ func TestICMPPermissionError(t *testing.T) {
 	t.Setenv("PATH", "/nonexistent-dir-xyz")
 	pr, err := NewICMPProbe("127.0.0.1", time.Second)
 	if err == nil {
-		pr.Close()
+		_ = pr.Close()
 		t.Fatal("NewICMPProbe succeeded without any ICMP tier")
 	}
 	if !strings.Contains(err.Error(), "unable to create ICMP socket") {
@@ -90,7 +90,7 @@ func TestPingCmdProbeLoopbackUp(t *testing.T) {
 	if err != nil {
 		t.Skipf("ping unavailable: %v", err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeUp {
 		t.Fatalf("outcome = %v, want up (err=%v)", r.Outcome, r.Err)
@@ -107,7 +107,7 @@ func TestPingCmdProbeIPv6Up(t *testing.T) {
 	if err != nil {
 		t.Skipf("ping unavailable: %v", err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeUp {
 		t.Fatalf("outcome = %v, want up (err=%v)", r.Outcome, r.Err)
@@ -121,7 +121,7 @@ func TestPingCmdProbeTimeoutDown(t *testing.T) {
 	if err != nil {
 		t.Skipf("ping unavailable: %v", err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeDown {
 		t.Fatalf("outcome = %v, want down (err=%v)", r.Outcome, r.Err)
@@ -146,7 +146,7 @@ exit 2
 	if err != nil {
 		t.Skipf("ping tier unavailable: %v", err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeError {
 		t.Fatalf("outcome = %v, want error", r.Outcome)

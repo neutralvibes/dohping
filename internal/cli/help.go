@@ -8,7 +8,7 @@ import (
 // WriteHelp prints the full help text. It is also the usage text shown
 // after usage errors (the caller prints the error line first).
 func WriteHelp(w io.Writer) {
-	fmt.Fprint(w, `dohping — a better interactive ping
+	_, _ = fmt.Fprint(w, `dohping — a better interactive ping
 
 Usage:
   dohping [options] HOST
