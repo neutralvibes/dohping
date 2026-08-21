@@ -35,7 +35,16 @@ jobs:
 
       - name: Install golangci-lint (prebuilt tarball)
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v2.13.1
+          # Verify the tarball against the published checksums before
+          # extracting — the installer's own verify can race the release
+          # asset/checksum mirrors and fail spuriously.
+          GL_VER=v2.13.1
+          GL_FILE=golangci-lint-${GL_VER#v}-linux-amd64.tar.gz
+          curl -sSfL -o "$GL_FILE" https://github.com/golangci/golangci-lint/releases/download/$GL_VER/$GL_FILE
+          curl -sSfL -o gl-checksums.txt https://github.com/golangci/golangci-lint/releases/download/$GL_VER/golangci-lint-${GL_VER#v}-checksums.txt
+          grep " $GL_FILE\$" gl-checksums.txt | sha256sum -c --ignore-missing -
+          tar xzf "$GL_FILE"
+          mv golangci-lint-${GL_VER#v}-linux-amd64/golangci-lint /usr/local/bin/
           golangci-lint --version
 
       - name: Install staticcheck (standalone, authoritative)
