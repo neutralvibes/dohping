@@ -161,7 +161,7 @@ func (w *Window) Finalize() {
 	w.forceRender = true
 	w.Redraw()
 	w.forceRender = false
-	fmt.Fprint(w.w, "\r\n")
+	_, _ = fmt.Fprint(w.w, "\r\n")
 }
 
 // Tick advances the liveness animation one frame, refreshes the live
@@ -350,7 +350,7 @@ func (w *Window) Redraw() {
 			debugx.Debugf("redraw", "repainted tw=%d phys=%d (was %d) rows=%d", tw, totalPhys, w.lastPhysRows, rows)
 		}
 	}
-	fmt.Fprint(w.w, sb.String())
+	_, _ = fmt.Fprint(w.w, sb.String())
 }
 
 // physicalRows is how many terminal rows a line of the given cell width
@@ -506,7 +506,7 @@ func (w *Window) resizeRestart() {
 		return
 	}
 	w.resizePending = false
-	fmt.Fprint(w.w, "\r\n")
+	_, _ = fmt.Fprint(w.w, "\r\n")
 	w.lastPhysRows = 1
 }
 

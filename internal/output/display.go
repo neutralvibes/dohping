@@ -181,7 +181,7 @@ func (d *Display) Finalize() {
 // it — the old line stays frozen on screen as history.
 func (d *Display) printFinalized(s string) {
 	if !d.live {
-		fmt.Fprintln(d.w, s)
+		_, _ = fmt.Fprintln(d.w, s)
 		return
 	}
 	tw := d.termWidth()
@@ -214,7 +214,7 @@ func (d *Display) printFinalized(s string) {
 	}
 	sb.WriteString("\r\n")
 	d.lastPhysRows = 1 // next live line starts fresh below the finalized line
-	fmt.Fprint(d.w, sb.String())
+	_, _ = fmt.Fprint(d.w, sb.String())
 }
 
 // writeLive writes the live line in place with wrap bookkeeping (DECISIONS
@@ -266,7 +266,7 @@ func (d *Display) writeLive(s string) {
 		fmt.Fprintf(&sb, "\x1b[%dA", d.lastPhysRows-phys)
 	}
 	d.lastPhysRows = phys
-	fmt.Fprint(d.w, sb.String())
+	_, _ = fmt.Fprint(d.w, sb.String())
 }
 
 // resizeSettleDelay is how long the width must stay stable after a change
@@ -304,7 +304,7 @@ func (d *Display) resizeRestart() {
 		return
 	}
 	d.resizePending = false
-	fmt.Fprint(d.w, "\r\n")
+	_, _ = fmt.Fprint(d.w, "\r\n")
 	d.lastPhysRows = 1
 }
 
@@ -322,7 +322,7 @@ func (d *Display) resizeMarkAbove(oldPhys int, s string, tw int) {
 	if oldPhys != 1 || physicalRows(cellWidth(s), tw) != 1 {
 		return
 	}
-	fmt.Fprint(d.w, "\x1b[1A\r-\x1b[K\x1b[1B\r")
+	_, _ = fmt.Fprint(d.w, "\x1b[1A\r-\x1b[K\x1b[1B\r")
 }
 
 // termWidth returns the terminal width in cells (0 = unknown → no wrap).
@@ -337,5 +337,5 @@ func (d *Display) termWidth() int {
 // printLine writes a plain (non-live) line: the header, or finalized
 // lines in non-live mode.
 func (d *Display) printLine(s string) {
-	fmt.Fprintln(d.w, s)
+	_, _ = fmt.Fprintln(d.w, s)
 }

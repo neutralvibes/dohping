@@ -331,7 +331,7 @@ func cellWidth(s string) int {
 		if s[i] == '\x1b' {
 			if i+1 < len(s) && s[i+1] == '[' {
 				j := i + 2
-				for j < len(s) && !(s[j] >= 0x40 && s[j] <= 0x7e) {
+				for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
 					j++
 				}
 				if j < len(s) {

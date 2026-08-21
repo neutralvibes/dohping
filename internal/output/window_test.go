@@ -75,7 +75,7 @@ func (t *termScreen) feed(s string) {
 				params := []int{}
 				num := 0
 				haveNum := false
-				for j < len(s) && !(s[j] >= 0x40 && s[j] <= 0x7e) {
+				for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
 					if s[j] >= '0' && s[j] <= '9' {
 						num = num*10 + int(s[j]-'0')
 						haveNum = true
