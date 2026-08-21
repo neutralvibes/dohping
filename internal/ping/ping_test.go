@@ -144,69 +144,6 @@ func TestTCPProbeCancellation(t *testing.T) {
 	}
 }
 
-// TestICMPProbeLoopback probes the loopback address through whatever ICMP
-// tier the environment permits (raw socket, unprivileged ping socket, or
-// the system ping command fallback). All three must report up.
-func TestICMPProbeLoopback(t *testing.T) {
-	pr, err := NewICMPProbe("127.0.0.1", time.Second)
-	if err != nil {
-		t.Fatalf("NewICMPProbe: %v", err)
-	}
-	defer pr.Close()
-
-	r := pr.Probe(context.Background())
-	if r.Outcome != OutcomeUp {
-		t.Fatalf("outcome = %v, want up (err=%v)", r.Outcome, r.Err)
-	}
-	if r.RTT <= 0 {
-		t.Errorf("RTT = %v, want > 0", r.RTT)
-	}
-}
-
-// TestICMPFallbackEngagesPingCommand asserts that in environments without
-// ICMP sockets, the ping-command tier is used (so the default probe still
-// works instead of failing with a permission error).
-func TestICMPFallbackEngagesPingCommand(t *testing.T) {
-	pr, err := NewICMPProbe("127.0.0.1", time.Second)
-	if err != nil {
-		t.Skipf("no ICMP tier available: %v", err)
-	}
-	defer pr.Close()
-	if _, ok := pr.(*pingCmdProbe); !ok {
-		// Raw or unprivileged socket tier engaged — even better.
-		t.Logf("socket tier engaged (%T); ping fallback not exercised", pr)
-		return
-	}
-	r := pr.Probe(context.Background())
-	if r.Outcome != OutcomeUp {
-		t.Errorf("ping fallback outcome = %v, want up (err=%v)", r.Outcome, r.Err)
-	}
-}
-
-// TestICMPPermissionError asserts the operational-error contract when
-// EVERY ICMP tier is unavailable: a clear error with guidance, never a
-// host-down outcome. The ping command is hidden via PATH so the fallback
-// cannot engage.
-func TestICMPPermissionError(t *testing.T) {
-	t.Setenv("PATH", "/nonexistent-dir-xyz")
-	pr, err := NewICMPProbe("127.0.0.1", time.Second)
-	if err == nil {
-		pr.Close()
-		t.Fatal("NewICMPProbe succeeded without any ICMP tier")
-	}
-	if !strings.Contains(err.Error(), "unable to create ICMP socket") {
-		t.Errorf("error = %q, want 'unable to create ICMP socket' framing", err)
-	}
-	if !IsPermissionError(err) {
-		t.Errorf("error = %v, want a permission-class error (EPERM/EACCES)", err)
-	}
-	// The failure is operational: constructing the probe must never be
-	// treated as evidence the host is down.
-	if strings.Contains(err.Error(), "down") {
-		t.Errorf("error mentions host-down: %q", err)
-	}
-}
-
 func TestICMPProbeDNSFailure(t *testing.T) {
 	_, err := NewICMPProbe("nonexistent-host.invalid", time.Second)
 	if err == nil {

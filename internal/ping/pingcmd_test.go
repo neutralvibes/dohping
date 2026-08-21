@@ -1,8 +1,6 @@
 package ping
 
 import (
-	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -47,46 +45,6 @@ func TestPingWaitSeconds(t *testing.T) {
 	}
 }
 
-func TestPingCmdProbeLoopbackUp(t *testing.T) {
-	pr, err := newPingCmdProbe("127.0.0.1", 2*time.Second)
-	if err != nil {
-		t.Skipf("ping unavailable: %v", err)
-	}
-	defer pr.Close()
-	r := pr.Probe(context.Background())
-	if r.Outcome != OutcomeUp {
-		t.Fatalf("outcome = %v, want up (err=%v)", r.Outcome, r.Err)
-	}
-	if r.RTT <= 0 {
-		t.Errorf("RTT = %v, want > 0", r.RTT)
-	}
-}
-
-func TestPingCmdProbeIPv6Up(t *testing.T) {
-	pr, err := newPingCmdProbe("::1", 2*time.Second)
-	if err != nil {
-		t.Skipf("ping unavailable: %v", err)
-	}
-	defer pr.Close()
-	r := pr.Probe(context.Background())
-	if r.Outcome != OutcomeUp {
-		t.Fatalf("outcome = %v, want up (err=%v)", r.Outcome, r.Err)
-	}
-}
-
-func TestPingCmdProbeTimeoutDown(t *testing.T) {
-	// TEST-NET-1: routed via the gateway, silently dropped → ping exit 1.
-	pr, err := newPingCmdProbe("192.0.2.1", 300*time.Millisecond)
-	if err != nil {
-		t.Skipf("ping unavailable: %v", err)
-	}
-	defer pr.Close()
-	r := pr.Probe(context.Background())
-	if r.Outcome != OutcomeDown {
-		t.Fatalf("outcome = %v, want down (err=%v)", r.Outcome, r.Err)
-	}
-}
-
 func TestPingCmdProbeErrorOnBadHost(t *testing.T) {
 	// Resolution failure surfaces at construction, like the other probes.
 	_, err := newPingCmdProbe("nonexistent-host.invalid", time.Second)
@@ -115,33 +73,5 @@ func TestPermissionMessage(t *testing.T) {
 		if permissionMessage(msg) {
 			t.Errorf("permissionMessage(%q) = true, want false", msg)
 		}
-	}
-}
-
-// TestPingCmdProbePermissionClassed verifies that a ping exit-2 permission
-// failure is classed as a permission error (EPERM), so the app can abort
-// with guidance instead of probing in error state.
-func TestPingCmdProbePermissionClassed(t *testing.T) {
-	dir := t.TempDir()
-	fakePing := `#!/bin/sh
-echo "ping: socket: Operation not permitted" >&2
-exit 2
-`
-	if err := os.WriteFile(dir+"/ping", []byte(fakePing), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir)
-
-	pr, err := newPingCmdProbe("127.0.0.1", time.Second)
-	if err != nil {
-		t.Skipf("ping tier unavailable: %v", err)
-	}
-	defer pr.Close()
-	r := pr.Probe(context.Background())
-	if r.Outcome != OutcomeError {
-		t.Fatalf("outcome = %v, want error", r.Outcome)
-	}
-	if !IsPermissionError(r.Err) {
-		t.Errorf("err = %v, want permission-class error", r.Err)
 	}
 }

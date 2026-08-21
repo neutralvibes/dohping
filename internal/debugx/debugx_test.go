@@ -50,7 +50,7 @@ func TestDebugfWritesTaggedLine(t *testing.T) {
 	if !strings.Contains(out, "[resize]") || !strings.Contains(out, "60→55 rows 12→12") {
 		t.Fatalf("debug line missing tag or message: %q", out)
 	}
-	tsRe := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2} `)
+	tsRe := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(?:Z|[+-]\d{2}:\d{2}) `)
 	if !tsRe.MatchString(out) {
 		t.Fatalf("debug line must start with an RFC3339-ms timestamp: %q", out)
 	}
