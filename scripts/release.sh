@@ -12,7 +12,14 @@ OUT="${1:-dist}"
 
 # The quality gate runs first — a red gate refuses to build a release.
 # (gofmt, vet, race tests, gosec + the other analyzers when installed.)
-"$ROOT/scripts/check.sh"
+# The gate script is a dev-tree convenience; in a published tree (CI)
+# the workflow's own quality-gate step already ran, so absence of the
+# script is not an error — skip with a warning.
+if [ -x "$ROOT/scripts/check.sh" ]; then
+  "$ROOT/scripts/check.sh"
+else
+  echo "release: scripts/check.sh not present (dev-only) — skipping local gate; CI gate already ran" >&2
+fi
 
 VERSION="${DOHPING_VERSION:-$(grep -m1 'Version = ' "$ROOT/internal/version/version.go" | sed -E 's/.*"([^"]+)".*/\1/')}"
 GOROOT_BIN="${GOROOT:-$(go env GOROOT)}/bin"
