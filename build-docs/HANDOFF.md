@@ -9,6 +9,55 @@ Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
 the reflow-aware in-place reclaim is SHIPPED (DECISIONS #78; dist sha
 8dcce21a…, byte-reproduced via `release.sh`).**
 
+**PUBLISH-GATE STATUS (2026-08-21 session): in progress — PR #1 open, CI
+being nursed to green. Read the "SESSION 2026-08-21" section below FIRST if
+resuming mid-fix.**
+
+---
+
+## SESSION 2026-08-21 — publish gate + CI fixing marathon (READ FIRST if resuming)
+
+**Where the publish stands:**
+- **PR #1 open**: https://github.com/neutralvibes/dohping/pull/1 (branch `publish-initial`). Push gate EXECUTED — the token's **Workflows** permission was added (user action), push no longer refused server-side.
+- **CI has run 4 times, all red so far** — each run caught a real defect. Down to the LAST issue (golangci-lint version). **Windows job is GREEN** as of the run on `b3a4f34` (WSAECONNREFUSED fix). Linux red only on golangci-lint.
+- Resume point: the in-flight golangci-lint v2.13.1 lint fixes (below) are NOT yet committed.
+
+**Fixes shipped this session (private master, all committed, `check.sh` GREEN locally):**
+1. `5fca079` — CI runs the quality gate INLINE (`ci.yml`) instead of `scripts/check.sh`. **check.sh stays PRIVATE** — it references the sandbox and internal process; the user challenged publishing it and was right. This is a deliberate architecture decision: public CI self-contained, private dev gate private.
+2. `454cdef` — `scripts/record-demo-cast.py` (asciinema cast recorder for the README demo GIF; dev tool, NOT in PUBLIC_ITEMS).
+3. `793f8c2` — debugx timestamp test made timezone-independent (UTC emits `Z`, not `+01:00`); POSIX-only signal + ping tests split behind `//go:build !windows` (`platform_test.go`, `ping_posix_test.go`).
+4. `cf0c3ee` — **WSAECONNREFUSED classification**: on Windows a refused TCP dial surfaces as WSAECONNREFUSED (10061); stdlib `syscall.ECONNREFUSED` is an invented value (APPLICATION_ERROR+22) that never matches. Platform-split `isRefused` helper (`refused_posix.go`/`refused_windows.go`) + `tcp_windows_test.go` regression.
+5. `9007c87` — **scrubbed ALL decision references from the public tree** (user directive: no DECISIONS #N / HANDOFF / SPEC-window refs in any file that reaches GitHub — they were in `icmp.go`, `app.go`, `debugx.go`, tests, `pty-resize-probe.py`, `ci.yml`). Verified zero matches across the published file list. `grep -rn 'DECISIONS|HANDOFF|SPECIFICATION|SPEC-window|...' <public files>` → clean. KEEP it clean.
+
+**IN FLIGHT — golangci-lint version bump (the current fixing work):**
+- Problem: ci.yml pins **golangci-lint v1.64.8**, built with go1.24 → fails on the Go 1.26.5 module: *"the Go language version (go1.24) used to build golangci-lint is lower than the targeted Go version (1.26.5)"*.
+- Decision (user-approved): bump to **v2.13.1** (built with go1.27.0; checksum-verified) and **FIX all 27 issues** the stricter v2 default set flags (23 errcheck + 4 staticcheck QF) — not disable them.
+- Local v2 binary: `/tmp/golangci-v2/golangci-lint-2.13.1-linux-amd64/golangci-lint` (note: installer checksum flaked once — download tarball + verify against checksums.txt manually if it recurs).
+- Fix progress: `internal/app/app.go` DONE (all `fmt.Fprintf`/`Fprintln`/`Close` → `_, _ =` / `defer func(){ _ = pr.Close() }()`).
+- **REMAINING lint fixes:**
+  - `internal/cli/help.go:11` — `fmt.Fprint` unchecked
+  - `internal/output/display.go` — several `fmt.Fprint`/`Fprintln`/`Fprintf` unchecked (lines ~184, 198, 213, 217, 251, 266, 269, 307, 325, 340)
+  - `internal/logx/logx.go:100` — QF1003 tagged-switch suggestion; `logx_test.go` — `l.Close`/`l2.Close` unchecked
+  - `internal/app/app_test.go:111`, `internal/output/format.go:334`, `internal/output/window_test.go:78` — QF1001 De Morgan's law (rewrite `!(a && b)` → `!a || !b`)
+  - `internal/app/run_integration_test.go` — `ln.Close`, `c.Close`, `pr.Close` unchecked
+  - `internal/ping/ping_test.go` — `c.Close`, `ln.Close`; `ping_posix_test.go` — `pr.Close` unchecked
+- **After fixes**: `check.sh` green (its golangci-lint is the local v1 binary — run the v2 binary manually to prove the CI gate; consider bumping local too), commit, re-derive `publish/`, push, **WATCH CI TO GREEN — never report done on a red/unknown CI** (the session's core lesson).
+
+**README v2 + demo GIF (separate workstream, PARKED until CI is green):**
+- Draft: `build-docs/README-v2-draft.md` (private, untracked; moved to /tmp around each publish then restored). Demo-first structure; user-approved direction; user chose a **real terminal recording GIF** as the hero (no badges).
+- GIF pipeline works: `python3 scripts/record-demo-cast.py` → cast file → `/home/hermes/.hermes/user/tools/bin/agg` → GIF. `/tmp/dohping-demo.gif` (22KB, 12s) + `/tmp/demo.cast` exist. Still to do: place GIF in repo, reference in README, finalize, decide if README ships in PR #1 or a follow-up.
+- The PR's current README is the PRE-improvement one (publish derived before `da935e5`); the private repo's README is newer but still man-page-ish — the v2 draft fixes that.
+
+**Session lessons (the user's points — carry forward):**
+1. **Read a file in full BEFORE asking whether it should be public.** "Should X be published?" is answered by reading X + the contract, not by asking.
+2. **Never report done without CI green.** I pushed 3× without watching CI; the user had to point at it. Verify the PUBLISHED tree (not just private) and watch the CI run to completion.
+3. **No decision/process references in public files.** DECISIONS #N, HANDOFF §, SPEC-window, sandbox-process detail — all scrubbed; the publish structure exists to keep them private.
+4. **golangci-lint v2 default set is stricter** (errcheck on by default) — v1.64.8 was silently permissive. The version pin must match the module's Go version.
+5. **Windows gotcha**: `syscall.ECONNREFUSED` is an invented APPLICATION_ERROR value; the real refused error is `WSAECONNREFUSED` (10061) via `golang.org/x/sys/windows`.
+6. Windows binaries/tests were never run on real Windows before this — the CI windows job is the first real validation.
+
+---
+
 ## Resize behavior — the current contract (window mode)
 
 - The block writes NOTHING while the width is moving (300 ms settle; every
