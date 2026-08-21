@@ -31,8 +31,10 @@ resuming mid-fix.**
 
 **IN FLIGHT — golangci-lint version bump (the current fixing work):**
 - Problem: ci.yml pins **golangci-lint v1.64.8**, built with go1.24 → fails on the Go 1.26.5 module: *"the Go language version (go1.24) used to build golangci-lint is lower than the targeted Go version (1.26.5)"*.
-- Decision (user-approved): bump to **v2.13.1** (built with go1.27.0; checksum-verified) and **FIX all 27 issues** the stricter v2 default set flags (23 errcheck + 4 staticcheck QF) — not disable them.
+- Decision (user-approved): bump to **v2.13.1** (built with go1.27.0; checksum-verified) and **FIX all 27 issues** the stricter v2 default set flags (23 errcheck + 4 staticcheck QF) — not disable them. **DONE — committed `da861a1`** (v2.13.1 reports 0 issues, gate green, Windows clean).
+- **Scrub scope decision (user correction 2026-08-21):** "there is nothing wrong with comments per-se." The `(DECISIONS #N)` / SPEC refs in `internal/output/*` (95 refs) are KEPT for v0.1.0 — the surrounding text carries the technical rationale; a blind regex pass mangled gofmt alignment + ASCII art and was reverted. A surgical per-comment scrub of `internal/output/*` is a documented FOLLOW-UP, not in the CI-green critical path. The worst leaks (HANDOFF §, SPEC-window filenames, "sandbox" in app/ping/debugx/ci.yml/pty-probe) are already scrubbed (`9007c87`).
 - Local v2 binary: `/tmp/golangci-v2/golangci-lint-2.13.1-linux-amd64/golangci-lint` (note: installer checksum flaked once — download tarball + verify against checksums.txt manually if it recurs).
+- **NEXT ACTION: commit the HANDOFF update, re-derive `publish/`, push, WATCH CI TO GREEN.** (README v2 + GIF workstream still parked until CI is green.)
 - Fix progress: `internal/app/app.go` DONE (all `fmt.Fprintf`/`Fprintln`/`Close` → `_, _ =` / `defer func(){ _ = pr.Close() }()`).
 - **REMAINING lint fixes:**
   - `internal/cli/help.go:11` — `fmt.Fprint` unchecked
