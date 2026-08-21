@@ -45,8 +45,19 @@ jobs:
           mv staticcheck/staticcheck /usr/local/bin/
           staticcheck -version
 
-      - name: Quality gate (gofmt, vet, race, golangci-lint, staticcheck, gosec)
-        run: bash scripts/check.sh
+      - name: Quality gate (gofmt, vet, race, debug build, analyzers)
+        run: |
+          set -uo pipefail
+          # One definition of green — same checks as the private scripts/check.sh.
+          gofmt_files="$(git ls-files '*.go')"
+          test -z "$(gofmt -l $gofmt_files)"
+          go vet ./...
+          go test -race -count=1 ./...
+          go vet -tags debug ./...
+          go test -race -count=1 -tags debug ./...
+          golangci-lint run
+          staticcheck ./...
+          gosec -quiet ./...
 
       - name: Fresh build (stale-build trap)
         run: |
