@@ -178,7 +178,7 @@ and stage-marking; if in doubt, ASK, don't assume).
 | 74 | `DOHPING_DEBUG=<path>` debug-log facility (`internal/debugx`, 0600, RFC3339-ms `[tag]` lines) — the app's own width telemetry | "Have you even seen a terminal tell you the width you are resizing to?" + "we should have had a facility for a debug logger already, just only enabled by code or ENV" |
 | 75/78 | REFLOW-AWARE IN-PLACE RECLAIM (shipped): crossings above the floor reclaim in place — one block, no frozen copy (SPEC-window-resize-reclaim.md) | "It is neither a defense or true. It is clear not what was required" (§8.5: no scrollback reliance) |
 | 76–77 | B episode: wrongly rejected on a stale binary, properly retested, promoted | "0014967e is out… This one should be set as the shipped build" |
-| 79 | Plain-mode state-change clobber: `resizeMarkAbove` fired on EVERY finalize (not just resizes), replacing the header/finalized history with `-`; now gated on a real resize | "prints a blank line with '-', losing the header. It also only shows 2 lines at a time" |
+| 79 | Plain-mode state-change clobber: `resizeMarkAbove` fired on EVERY finalize (not just resizes), replacing the header/finalized history with `-`; now gated on a real resize. **In wear-test 2026-08-23: "reasonably solid so far through a number of state changes"** | "prints a blank line with '-', losing the header. It also only shows 2 lines at a time" |
 
 Full per-fix history: DECISIONS.md (79 entries, each with rationale).
 
