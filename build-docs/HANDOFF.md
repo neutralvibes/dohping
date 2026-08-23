@@ -9,6 +9,14 @@ Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
 the reflow-aware in-place reclaim is SHIPPED (DECISIONS #78; dist sha
 8dcce21a…, byte-reproduced via `release.sh`).**
 
+**2026-08-23: plain-mode state-change clobber FIXED (DECISIONS #79).**
+`printFinalized` marked the row above the live line with `-` (the #68 resize
+artifact) on EVERY status change, not just resizes — the header was replaced
+by `-` on the first flip and history never accumulated ("only shows 2 lines
+at a time"). Caught by the user's host up/down script for the README GIF.
+Fix + `TestDisplayStatusChangeKeepsHistory` committed; dist sha
+`0ac183e1…`.
+
 **PUBLISH-GATE STATUS (2026-08-21 session): in progress — PR #1 open, CI
 being nursed to green. Read the "SESSION 2026-08-21" section below FIRST if
 resuming mid-fix.**
@@ -45,10 +53,11 @@ resuming mid-fix.**
   - `internal/ping/ping_test.go` — `c.Close`, `ln.Close`; `ping_posix_test.go` — `pr.Close` unchecked
 - **After fixes**: `check.sh` green (its golangci-lint is the local v1 binary — run the v2 binary manually to prove the CI gate; consider bumping local too), commit, re-derive `publish/`, push, **WATCH CI TO GREEN — never report done on a red/unknown CI** (the session's core lesson).
 
-**README v2 + demo GIF (separate workstream, PARKED until CI is green):**
-- Draft: `build-docs/README-v2-draft.md` (private, untracked; moved to /tmp around each publish then restored). Demo-first structure; user-approved direction; user chose a **real terminal recording GIF** as the hero (no badges).
-- GIF pipeline works: `python3 scripts/record-demo-cast.py` → cast file → `/home/hermes/.hermes/user/tools/bin/agg` → GIF. `/tmp/dohping-demo.gif` (22KB, 12s) + `/tmp/demo.cast` exist. Still to do: place GIF in repo, reference in README, finalize, decide if README ships in PR #1 or a follow-up.
-- The PR's current README is the PRE-improvement one (publish derived before `da935e5`); the private repo's README is newer but still man-page-ish — the v2 draft fixes that.
+**README v2 + demo GIF (PARKED 2026-08-21 — user called a break; DO NOT resume without explicit go):**
+- Draft: `build-docs/README-v2-draft.md` (private, untracked) → finished README v2 now at repo root `README.md` + copied to the rig at `served/projects/dohping/README.md` (+ README.html rendered via md2html.py, img src fixed to ./dohping-demo.gif).
+- Demo GIF: the rig's `dohping-demo.gif` is a SYNTHETIC composition (`scripts/compose-hero-demo.py` — asciinema cast with column-exact frames, no real host/PTY). User's final verdict: **"Still not good. Idea is right, previous lessons lost."** — the one-host state-change concept was right but execution drifted from earlier corrections. PARKED. Do not iterate on the GIF without the user asking.
+- User's hard-won demo requirements (see `demo-craft` skill, which captures them): default first/no flags, shortcuts look easy, state change is the story, no summary block, small tight terminal, compose don't record, verify frames by looking.
+- GIF pipeline tools: agg at `~/hermes/user/tools/bin/agg`; `scripts/compose-hero-demo.py` (synthetic), `scripts/record-hero-demo.py` (PTY recorder, two-session + listener variant), `scripts/record-shell-demo.py` (general shell recorder).
 
 **Session lessons (the user's points — carry forward):**
 1. **Read a file in full BEFORE asking whether it should be public.** "Should X be published?" is answered by reading X + the contract, not by asking.
@@ -169,8 +178,9 @@ and stage-marking; if in doubt, ASK, don't assume).
 | 74 | `DOHPING_DEBUG=<path>` debug-log facility (`internal/debugx`, 0600, RFC3339-ms `[tag]` lines) — the app's own width telemetry | "Have you even seen a terminal tell you the width you are resizing to?" + "we should have had a facility for a debug logger already, just only enabled by code or ENV" |
 | 75/78 | REFLOW-AWARE IN-PLACE RECLAIM (shipped): crossings above the floor reclaim in place — one block, no frozen copy (SPEC-window-resize-reclaim.md) | "It is neither a defense or true. It is clear not what was required" (§8.5: no scrollback reliance) |
 | 76–77 | B episode: wrongly rejected on a stale binary, properly retested, promoted | "0014967e is out… This one should be set as the shipped build" |
+| 79 | Plain-mode state-change clobber: `resizeMarkAbove` fired on EVERY finalize (not just resizes), replacing the header/finalized history with `-`; now gated on a real resize | "prints a blank line with '-', losing the header. It also only shows 2 lines at a time" |
 
-Full per-fix history: DECISIONS.md (78 entries, each with rationale).
+Full per-fix history: DECISIONS.md (79 entries, each with rationale).
 
 ## 4. Pending / next actions
 
@@ -362,6 +372,9 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
 - Do not commit taste decisions to memory/vault/skills without asking.
 - User's direct experimental evidence is ground truth — don't re-litigate settled
   findings with indirect logs.
+- **Public-facing prose (README, docs/): plain human phrasing, NO em-dashes
+  ('—').** An em-dash is an AI giveaway (user's convention; see the humanizer
+  skill). Applies to everything that reaches GitHub, including docs/.
 
 ## 9. Key file map
 

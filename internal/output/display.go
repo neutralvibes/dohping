@@ -191,8 +191,12 @@ func (d *Display) printFinalized(s string) {
 	d.resizeRestart() // force: finalize must land correctly even mid-episode
 	if forced {
 		debugx.Debugf("redraw", "plain finalize forces render (tw=%d)", tw)
+		// Only a resize-forced restart may mark the row above with '-'
+		// (DECISIONS #68). On a plain status change the row above the live
+		// line is real history (the header, or a previous finalized line) —
+		// marking it would clobber it (user report 2026-08-23).
+		d.resizeMarkAbove(oldPhys, s, tw)
 	}
-	d.resizeMarkAbove(oldPhys, s, tw)
 	var sb strings.Builder
 	if d.lastPhysRows > 1 {
 		fmt.Fprintf(&sb, "\x1b[%dA\r", d.lastPhysRows-1)

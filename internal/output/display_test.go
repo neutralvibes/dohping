@@ -657,6 +657,75 @@ func TestDisplayFinalizeDuringResize(t *testing.T) {
 	}
 }
 
+// TestDisplayStatusChangeKeepsHistory: a PLAIN status change (no resize)
+// must finalize the live line WITHOUT marking the row above with '-'.
+// The row above the live line on a status change is real history — the
+// header, or a previous finalized line — and resizeMarkAbove (DECISIONS
+// #68) clobbers it with '-', losing the header and flattening the
+// scrollback (user report 2026-08-23: "prints a blank line with '-',
+// losing the header. It also only shows 2 lines at a time"). The mark is
+// only legal when a resize actually forced the restart (writeLive already
+// gates it); printFinalized must too.
+func TestDisplayStatusChangeKeepsHistory(t *testing.T) {
+	var buf bytes.Buffer
+	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 100, 24)
+	*wPtr = 100
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	frame1 := buf.String()
+
+	// Flip to down: the up line finalizes. No width change happened, so
+	// the row above (the header) must survive untouched.
+	*now = now.Add(30 * time.Second)
+	downEv := state.Event{
+		Kind: state.EventStatusChange, Time: t0.Add(30 * time.Second),
+		Status: state.StatusDown, PrevStatus: state.StatusUp,
+		Duration: 30 * time.Second, Fails: 1,
+		PrevStats: buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1),
+	}
+	buf.Reset()
+	d.Handle(downEv)
+	finalDown := buf.String()
+	if strings.Contains(finalDown, "\x1b[1A\r-") {
+		t.Errorf("status-change finalize marks the row above with '-': %q", finalDown)
+	}
+
+	// Flip back up: the down line finalizes; the up line above must stay.
+	*now = now.Add(60 * time.Second)
+	upEv := state.Event{
+		Kind: state.EventStatusChange, Time: t0.Add(60 * time.Second),
+		Status: state.StatusUp, PrevStatus: state.StatusDown,
+		Duration: 30 * time.Second, Fails: 0,
+		PrevStats: state.Stats{Count: 0},
+	}
+	buf.Reset()
+	d.Handle(upEv)
+	finalUp := buf.String()
+	if strings.Contains(finalUp, "\x1b[1A\r-") {
+		t.Errorf("second status-change finalize marks the row above with '-': %q", finalUp)
+	}
+
+	// Render the whole session through the emulator: header at row 0,
+	// then one finalized line per status period, live line at the end.
+	scr := newTermScreen(24, 100)
+	scr.feed(frame1)
+	scr.feed(finalDown)
+	scr.feed(finalUp)
+	if got := scr.line(0); !strings.HasPrefix(got, "TIME") {
+		t.Errorf("row 0 = %q, want the header (TIME...)", got)
+	}
+	if got := scr.line(1); !strings.HasPrefix(got, "11:00:35") {
+		t.Errorf("row 1 = %q, want the finalized up line (11:00:35...)", got)
+	}
+	if got := scr.line(2); !strings.HasPrefix(got, "11:01:05") {
+		t.Errorf("row 2 = %q, want the finalized down line (11:01:05...)", got)
+	}
+	if got := scr.line(3); !strings.HasPrefix(got, "11:01:35") {
+		t.Errorf("row 3 = %q, want the new live up line (11:01:35...)", got)
+	}
+}
+
 // TestDisplayFinalizeAfterWrappedLiveLineStartsClean: finalizing a wrapped
 // live line must write the finalized line from the live line's TRUE start
 // (walk-back), not from the cursor's row on the wrap tail — otherwise the
