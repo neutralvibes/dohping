@@ -1,0 +1,4 @@
+/dohping
+/dohping.exe
+dist/
+*.test
