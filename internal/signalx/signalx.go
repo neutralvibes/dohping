@@ -1,4 +1,4 @@
-// Package signalx centralizes termination-signal handling (spec §15.1):
+// Package signalx centralizes termination-signal handling:
 // SIGINT and SIGTERM are delivered on one channel so the app can map them
 // to the Unix exit codes 130/143.
 package signalx

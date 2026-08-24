@@ -1,7 +1,7 @@
 // Package ping implements the Probe abstraction: a typed probe of a single
 // target. Two implementations ship: ICMP echo (default) and TCP connect.
 //
-// The contract (spec §4.1): a probe result is one of
+// The probe contract: a probe result is one of
 //
 //   - OutcomeUp   — reachability proved (ICMP reply; TCP established or
 //     connection refused)

@@ -20,7 +20,7 @@ import (
 )
 
 // TestDisplayResizeDebugForensics proves plain-mode resize episodes are
-// logged through the debug facility (DECISIONS #74) — the width change and
+// logged through the debug facility — the width change and
 // the settle restart — so a resize episode in plain mode is fully
 // reconstructable from the app's own log, the same way window mode is.
 func TestDisplayResizeDebugForensics(t *testing.T) {

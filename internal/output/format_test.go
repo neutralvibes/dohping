@@ -37,10 +37,10 @@ func TestUpLineGolden(t *testing.T) {
 		Stats:    buildStats(1700*time.Microsecond, 5900*time.Microsecond, 2700*time.Microsecond, 3),
 	}
 	got := plainLayout("192.168.1.23").FormatLine(ln)
-	// Column-starts (0-based, DECISIONS #68): TIME@0 HOST@10 STATE@26
+	// Column-starts (0-based): TIME@0 HOST@10 STATE@26
 	// DURATION@32 MIN@47 MAX@55 AVG@63 FAILS@71.
 	// Values are left-aligned in their fields, starting directly under the
-	// header labels — this line is byte-identical to the spec §7.4 example.
+	// header labels — this line is byte-identical to the published example.
 	want := "11:00:35  192.168.1.23    up" + strings.Repeat(" ", 4) + "0d 00:35:26" +
 		strings.Repeat(" ", 4) + "1.70" + strings.Repeat(" ", 4) + "5.90" +
 		strings.Repeat(" ", 4) + "2.70"
@@ -92,8 +92,8 @@ func TestErrorLineGolden(t *testing.T) {
 }
 
 func TestUnknownLineGolden(t *testing.T) {
-	// The never-established status renders as "?" in the table (DECISIONS
-	// #68): it must fit the 5-cell STATE field so the line stays 79 wide.
+	// The never-established status renders as "?" in the table:
+	// it must fit the 5-cell STATE field so the line stays 79 wide.
 	// The word "unknown" survives in prose contexts (the exit summary).
 	ln := Line{
 		Time:     t0,
@@ -238,7 +238,7 @@ func TestRFC3339HeaderAndLine(t *testing.T) {
 func TestFullWidthStable(t *testing.T) {
 	// The padded width used for live overwrite must equal the sum of field
 	// widths + separators, independent of content. Minimum line = 64
-	// fixed + 15 HOST = 79 — under 80 (DECISIONS #68).
+	// fixed + 15 HOST = 79 — under 80.
 	layout := plainLayout("192.168.1.23")
 	short := layout.FormatLine(Line{Time: t0, Status: state.StatusUp, Duration: time.Second, Stats: buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1)})
 	_ = short
@@ -248,8 +248,8 @@ func TestFullWidthStable(t *testing.T) {
 }
 
 func TestLayoutResizeContentFit(t *testing.T) {
-	// HOST is content-fit with a terminal cap (DECISIONS #64,
-	// user-approved 2026-08-17): as wide as the host's own length (clamped
+	// HOST is content-fit with a terminal cap,
+	// user-approved 2026-08-17: as wide as the host's own length (clamped
 	// to [15, 40]) but never wider than the terminal leaves after the
 	// fixed columns; the floor is 15 and unknown width changes nothing.
 	l := NewLayout("google.com", "HH:MM:SS", nil) // 10 cells → min 15
@@ -285,7 +285,7 @@ func TestLayoutResizeContentFit(t *testing.T) {
 		t.Errorf("displayHost after floor resize = %q, want 14 cells + ellipsis", l2.displayHost)
 	}
 	l2.Resize(78) // below the 79-cell floor: HOST stays content-fit (22),
-	// the FAILS column drops instead of the line wrapping (DECISIONS #71)
+	// the FAILS column drops instead of the line wrapping.
 	if l2.hostWidth != 22 {
 		t.Errorf("Resize(78) = %d, want 22 (HOST absorbs, FAILS dropped)", l2.hostWidth)
 	}
@@ -311,7 +311,7 @@ func TestLayoutResizeContentFit(t *testing.T) {
 }
 
 func TestLayoutTrimDropsRightmostColumns(t *testing.T) {
-	// DECISIONS #71: below the HOST floor the rightmost columns drop (each
+	// Below the HOST floor the rightmost columns drop (each
 	// 8 cells) so the line fits instead of wrapping. Thresholds at
 	// HH:MM:SS + HOST-15: 79 all four, 71-78 no FAILS, 63-70 no FAILS/AVG,
 	// 55-62 only MIN, 47-54 essentials only, <47 wraps.
@@ -365,7 +365,7 @@ func TestLayoutTrimDropsRightmostColumns(t *testing.T) {
 func TestRuneBasedCellWidth(t *testing.T) {
 	// cellWidth is the display-cell width: runes minus ANSI escape
 	// sequences (SGR colors add bytes, not cells) — the exact measure the
-	// window renderer's wrap math needs (DECISIONS #64).
+	// window renderer's wrap math needs.
 	cases := []struct {
 		s    string
 		want int
@@ -399,7 +399,7 @@ func TestPadIsRuneBased(t *testing.T) {
 
 func TestTruncateHostRuneBased(t *testing.T) {
 	// Byte-slicing would cut mid-rune and misalign the column; rune-slicing
-	// keeps the field exactly w cells (DECISIONS #64).
+	// keeps the field exactly w cells.
 	if got := truncateHost("münchen.example.com", 6); got != "münch…" {
 		t.Errorf("truncateHost(6) = %q, want münch…", got)
 	}
@@ -417,7 +417,7 @@ func TestTruncateHostRuneBased(t *testing.T) {
 func TestLiveLineAnimationFrame(t *testing.T) {
 	// The liveness animation occupies the last cell of the DURATION
 	// field's padding (column 45 at the HOST-15 minimum): finalized lines
-	// keep a plain space (byte-identical to spec §7.4), live lines show
+	// keep a plain space (byte-identical to the published example), live lines show
 	// the rising bar there, and the DURATION↔MIN separator (column 46)
 	// stays a space so the bar floats between the values with whitespace
 	// on both sides.

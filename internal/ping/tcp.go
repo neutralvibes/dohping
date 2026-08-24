@@ -11,7 +11,7 @@ import (
 
 // TCPProbe connects to a resolved TCP address. No privileges required.
 //
-// Semantics (spec §4.1): established or refused → up (a refusal proves the
+// Semantics: established or refused → up (a refusal proves the
 // host answered); timeout → down (SYN silently dropped); DNS/routing or
 // other operational errors → error.
 type TCPProbe struct {

@@ -25,7 +25,7 @@ import (
 	"dohping/internal/version"
 )
 
-// Exit codes (spec §18).
+// Exit codes.
 const (
 	ExitOK         = 0
 	ExitError      = 1
@@ -146,10 +146,10 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 			defer restore()
 		}
 	} else {
-		close(keyCh) // no key handling with piped stdin (spec §15.4)
+		close(keyCh) // no key handling with piped stdin
 	}
 
-	// Display selection (spec §17): quiet suppresses all; window mode needs
+	// Display selection: quiet suppresses all; window mode needs
 	// a terminal (else fall back to plain mode with a warning); otherwise
 	// plain line mode.
 	var disp displayer
@@ -382,7 +382,7 @@ func logFinal(l *logx.Logger, host string, eng *state.Engine) {
 	})
 }
 
-// printSummary renders the optional exit summary (spec §15.3), shown only
+// printSummary renders the optional exit summary, shown only
 // on interactive terminals so scripted/piped output stays parseable.
 //
 // Every line is \r-prefixed AND \r\n-terminated: after Finalize the

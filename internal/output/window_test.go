@@ -24,7 +24,7 @@ func newTestWindowSized(buf *bytes.Buffer, lines int, quiet, noHeader bool, widt
 
 // newTestWindowResizable injects a MUTABLE terminal size AND clock: tests
 // simulate a resize by changing the captured variables between redraws,
-// and advance the clock to settle the resize freeze (DECISIONS #67). The
+// and advance the clock to settle the resize freeze. The
 // closures capture the parameter variables themselves, so mutating the
 // returned pointers changes what the next Redraw sees.
 func newTestWindowResizable(buf *bytes.Buffer, host string, lines int, quiet, noHeader bool, width, height int) (*Window, *int, *int, *time.Time) {
@@ -137,8 +137,8 @@ func (t *termScreen) feed(s string) {
 			i++ // other control: ignore
 		default:
 			// DECAWM-style autowrap: at the right margin the next cell starts
-			// a new physical row (proves below-floor wrap behavior — DECISIONS
-			// #64). Placement is identical to a real terminal for the
+			// a new physical row (proves below-floor wrap behavior).
+			// Placement is identical to a real terminal for the
 			// sequences dohping emits. The continuation row is part of the
 			// SAME logical line (reflow model).
 			if t.c >= t.cols {
@@ -180,7 +180,7 @@ func (t *termScreen) line(r int) string {
 // resize changes the terminal width WITHOUT reflowing existing content —
 // the behavior of xterm/gnome-terminal-style terminals on resize (lines
 // keep their cells; only new writes use the new width). Used to simulate
-// a mid-run resize faithfully (DECISIONS #65); the cursor is left where
+// a mid-run resize faithfully; the cursor is left where
 // it was, exactly as a non-reflowing terminal leaves it.
 func (t *termScreen) resize(cols int) {
 	if cols > t.cols {
@@ -201,8 +201,7 @@ func (t *termScreen) resize(cols int) {
 // physical rows, a previously wrapped line unwraps — and the cursor
 // follows its content (the app's invariant: it sits at the end of the
 // last written line, re-wrapped). This is the model for the user's
-// terminal and the anchor assumption of the in-place reclaim
-// (SPEC-window-resize-reclaim.md §3.1).
+// terminal and the anchor assumption of the in-place reclaim.
 func (t *termScreen) reflowResize(cols int) {
 	// Reconstruct logical lines from the lineStart markers, remembering
 	// which line the cursor sits in.
@@ -274,7 +273,8 @@ func (t *termScreen) reflowResize(cols int) {
 	}
 }
 
-// TestWindowRenderedScreenClean is the regression test for DECISIONS #54:
+// TestWindowRenderedScreenClean is the regression test for the
+// column-reset bug:
 // the visible screen after several redraws must be a clean fixed block —
 // one header row, one live line, blank padding — with no stale fragments
 // from earlier frames. The earlier bug wrote redraws at the cursor's
@@ -326,7 +326,7 @@ func TestWindowRenderedScreenClean(t *testing.T) {
 }
 
 func TestWindowStaysOnNormalScreen(t *testing.T) {
-	// DECISIONS #53: window mode must not clear or take over the screen.
+	// Window mode must not clear or take over the screen.
 	// Enter/Exit are no-ops; no alternate-screen, cursor-home, or
 	// clear-to-end-of-screen sequences may ever appear.
 	var buf bytes.Buffer
@@ -383,7 +383,7 @@ func TestWindowLiveUpdateRedraws(t *testing.T) {
 	if !strings.Contains(buf.String(), "0d 00:00:05") {
 		t.Errorf("duration not updated: %q", buf.String())
 	}
-	// DECISIONS #54: the redraw must return to column 0 before rewriting,
+	// The redraw must return to column 0 before rewriting,
 	// or stale fragments remain on screen. Block = header + 5 rows = 6,
 	// so the redraw moves up 5 rows, then carriage-returns.
 	if !strings.Contains(buf.String(), "\x1b[5A\r") {
@@ -608,8 +608,7 @@ func statusCol(hostWidth int) int { return 8 + 2 + hostWidth + 1 }
 // the essentials floor (wrapped, 2 rows per line) that crosses to a wide
 // width (the reflow UNWRAPS it) is RECLAIMED in place on a reflowing
 // terminal — the reflowed span is exactly known, so the block is
-// overwritten at its anchor: one block, no frozen copy
-// (SPEC-window-resize-reclaim.md; was the #67 grow-back freeze test).
+// overwritten at its anchor: one block, no frozen copy.
 func TestWindowResizeGrowBackReclaimsInPlace(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 2, false, false, 40, 24)
@@ -668,8 +667,8 @@ func TestWindowResizeGrowBackReclaimsInPlace(t *testing.T) {
 // TestWindowResizeRetractsHostColumn: on a narrow terminal the HOST column
 // retracts to fit (content-fit with terminal cap — user-approved
 // 2026-08-17), the STATUS column follows, and growing back restores the
-// original columns. A resize now freezes and restarts the block below
-// (DECISIONS #67); the NEW block uses the new width's columns. Rendered
+// original columns. A resize now freezes and restarts the block below;
+// the NEW block uses the new width's columns. Rendered
 // through the emulator at both widths (each frame starts at the cursor
 // origin, so the restart CRLF places the block's header at row 1).
 func TestWindowResizeRetractsHostColumn(t *testing.T) {
@@ -690,8 +689,8 @@ func TestWindowResizeRetractsHostColumn(t *testing.T) {
 
 	// Shrink to 79 (the minimum floor): same wrap band — the line fits in
 	// one row at both widths, so a reflow cannot move the block. The
-	// repaint is DEFERRED until the width settles (no writes mid-reflow,
-	// DECISIONS #73), then happens IN PLACE with HOST retracted to 15 and
+	// repaint is DEFERRED until the width settles (no writes mid-reflow),
+	// then happens IN PLACE with HOST retracted to 15 and
 	// STATE at col 26: no freeze, no frozen duplicate.
 	*wPtr = 79
 	*now = now.Add(100 * time.Millisecond)
@@ -755,7 +754,7 @@ func TestWindowResizeRetractsHostColumn(t *testing.T) {
 
 // TestWindowResizeMinWidthTruncatesHost: at the 79-cell minimum the HOST
 // column is 15 cells and a long host shows the ellipsis; the truncation is
-// cell-exact (rune-based, DECISIONS #64) so STATE stays at col 26.
+// cell-exact (rune-based) so STATE stays at col 26.
 func TestWindowResizeMinWidthTruncatesHost(t *testing.T) {
 	var buf bytes.Buffer
 	w := newTestWindowSized(&buf, 5, false, false, 79, 24)
@@ -783,7 +782,7 @@ func TestWindowResizeMinWidthTruncatesHost(t *testing.T) {
 
 // TestWindowResizeBelowFloorWrapsCoherently is the regression test for the
 // reported bug: a terminal narrower than the essentials floor (47 cells —
-// columns dropped first per DECISIONS #71) wraps every line, and the block
+// columns dropped first) wraps every line, and the block
 // must repaint as a coherent stack — one header, one live line, no
 // interleaved fragments — even across repeated redraws. The old code
 // counted LOGICAL rows for cursor movement, so a wrapped block's cursor-up
@@ -842,8 +841,7 @@ func screenRows(scr *termScreen) []string {
 
 // TestWindowResizeGrowBackKeepsFrozenRows: growing the terminal back after
 // a narrow (wrapped) frame — the block freezes at the old width and
-// restarts below once settled; nothing below the fresh block may remain
-// (DECISIONS #67 — the in-place reclaim is gone).
+// restarts below once settled; nothing below the fresh block may remain.
 func TestWindowResizeGrowBackKeepsFrozenRows(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
@@ -895,8 +893,7 @@ func TestWindowResizeGrowBackKeepsFrozenRows(t *testing.T) {
 // the terminal grows) is RECLAIMED in place once the width settles — no
 // writes mid-reflow, then the reflowed span is walked back and the fresh
 // frame overwrites the old one: exactly ONE block, no frozen copy, no
-// restart CRLF (SPEC-window-resize-reclaim.md; was the #67
-// freeze-then-restart test).
+// restart CRLF.
 func TestWindowResizeCrossingReclaimsInPlace(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
@@ -945,8 +942,7 @@ func TestWindowResizeCrossingReclaimsInPlace(t *testing.T) {
 // TestWindowResizeDragReclaimsOnce: a resize drag restarts the settle
 // clock on every width change — nothing writes while the width keeps
 // moving, and once it has been stable for resizeSettleDelay the crossing
-// is RECLAIMED in place exactly once: no frozen block, no restart
-// (SPEC-window-resize-reclaim.md; was the #67 drag-keeps-freezing test).
+// is RECLAIMED in place exactly once: no frozen block, no restart.
 func TestWindowResizeDragReclaimsOnce(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 40, 24)
@@ -995,11 +991,11 @@ func TestWindowResizeDragReclaimsOnce(t *testing.T) {
 
 // TestWindowResizeSameBandRepaintsInPlace: a width change that leaves every
 // line's physical row count unchanged (60 → 55: with column trimming the
-// line fits in one row at both widths — DECISIONS #71) cannot move the
+// line fits in one row at both widths) cannot move the
 // block in a reflow, so it must repaint IN PLACE — but DEFERRED until the
-// width settles (no writes mid-reflow, DECISIONS #73): nothing at 100ms,
+// width settles (no writes mid-reflow): nothing at 100ms,
 // an in-place repaint after the settle — no freeze, no fresh-row restart,
-// no frozen block left in scrollback (DECISIONS #70).
+// no frozen block left in scrollback.
 func TestWindowResizeSameBandRepaintsInPlace(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
@@ -1049,7 +1045,7 @@ func TestWindowResizeSameBandRepaintsInPlace(t *testing.T) {
 // TestWindowResizeSameBandWrappedInPlace: terminal BELOW the essentials
 // floor (the live line wraps at both widths — 46 cells with its animation
 // frame vs 40/45 cols; the header fits at 40+), resized within the same
-// wrap band. Must defer through the settle (no writes mid-reflow, #73)
+// wrap band. Must defer through the settle (no writes mid-reflow)
 // then repaint in place, wrapped and coherent, with exactly one block (no
 // frozen duplicate).
 func TestWindowResizeSameBandWrappedInPlace(t *testing.T) {
@@ -1095,7 +1091,7 @@ func TestWindowResizeSameBandWrappedInPlace(t *testing.T) {
 }
 
 // TestWindowResizeSameBandDragNoFreeze: a drag confined to one wrap band
-// defers every step (no writes mid-reflow, DECISIONS #73) and repaints in
+// defers every step (no writes mid-reflow) and repaints in
 // place exactly once after the width settles — no restart, no frozen
 // block (the old unconditional behavior froze on every step of the drag,
 // stacking a block per width).
@@ -1129,8 +1125,7 @@ func TestWindowResizeSameBandDragNoFreeze(t *testing.T) {
 // the live line wraps at 45, fits at 60) is a genuine crossing — and on a
 // reflowing terminal it is RECLAIMED in place: the wrapped frame unwraps
 // to a known span, the settle repaint walks it back and overwrites it.
-// One block, no frozen copy (SPEC-window-resize-reclaim.md; was the #70
-// band-crossing-freezes test).
+// One block, no frozen copy.
 func TestWindowResizeCrossingUnwrapsInPlace(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 45, 24)
@@ -1226,7 +1221,7 @@ func TestWindowResizeStaleWideFrameReclaims(t *testing.T) {
 // the essentials floor, the fresh frame itself wraps and its reflowed
 // anchor is unknowable — the freeze fallback still fires: the block
 // restarts on a fresh row below the frozen rendering (two blocks), the
-// pre-reclaim behavior (SPEC-window-resize-reclaim.md §3.2).
+// below-floor fallback behavior.
 func TestWindowResizeBelowFloorSettleFreezes(t *testing.T) {
 	var buf bytes.Buffer
 	w, wPtr, _, now := newTestWindowResizable(&buf, "frigate.app.home", 5, false, false, 60, 24)
@@ -1309,7 +1304,7 @@ func TestWindowResizeFinalizeReclaims(t *testing.T) {
 }
 
 // TestWindowTrimAtNarrowWidth: below the 79-cell line width the window
-// drops rightmost columns instead of wrapping (DECISIONS #71) — at 60 cols
+// drops rightmost columns instead of wrapping — at 60 cols
 // the line is 55 cells (TIME/HOST/STATE/DURATION/MIN: FAILS, AVG and MAX
 // dropped), the block is a single row per line, and the screen is one
 // clean unwrapped block with the live line directly under the header.
@@ -1352,7 +1347,8 @@ func TestWindowTrimAtNarrowWidth(t *testing.T) {
 	}
 }
 
-// TestWindowResizeDebugForensics: with the debug logger enabled (DECISIONS
-// #74), a same-band resize must log the observeResize decision (defer) and
-// (The window-resize debug-forensics test moved to forensics_debug_test.go
-// — it asserts on debugx output and lives under -tags debug.)
+// TestWindowResizeDebugForensics: with the debug logger enabled, a
+// same-band resize must log the observeResize decision (defer) and
+// the settle repaint. (The window-resize debug-forensics test moved to
+// forensics_debug_test.go — it asserts on debugx output and lives under
+// -tags debug.)

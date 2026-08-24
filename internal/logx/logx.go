@@ -1,4 +1,4 @@
-// Package logx writes the durable status-event log (spec §14): append-only,
+// Package logx writes the durable status-event log: append-only,
 // never colors or cursor control, RFC 3339 timestamps, IPv6 hosts
 // bracketed, independent of quiet mode.
 package logx
@@ -72,7 +72,7 @@ func (l *Logger) Close() error {
 	return err
 }
 
-// textLine renders the CSV format (spec §14.4): one event per line,
+// textLine renders the CSV format: one event per line,
 // comma-separated columns, address before state, duration in raw seconds,
 // and unavailable fields left as empty cells (machine-readable — a CSV
 // parser reads them as "not applicable", same semantics as JSON's
@@ -92,7 +92,7 @@ func (l *Logger) textLine(e Entry) string {
 	return strings.Join(base, ",") + "\n"
 }
 
-// jsonLine renders the JSON format (spec §14.5): one object per line,
+// jsonLine renders the JSON format: one object per line,
 // RTT fields omitted for down/error, fails omitted for error.
 func (l *Logger) jsonLine(e Entry) string {
 	je := jsonEntry{
@@ -131,7 +131,7 @@ type jsonEntry struct {
 }
 
 // bracketIPv6 wraps bare IPv6 literals in brackets so host values are
-// unambiguous in logs (spec §14.6). Already-bracketed or non-IPv6 values
+// unambiguous in logs. Already-bracketed or non-IPv6 values
 // pass through.
 func bracketIPv6(host string) string {
 	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
@@ -144,7 +144,7 @@ func ms(d time.Duration) float64 {
 	return float64(d) / float64(time.Millisecond)
 }
 
-// ms2 rounds an RTT to two decimals for JSON output (spec §14.5 shows
+// ms2 rounds an RTT to two decimals for JSON output (the JSON log shows
 // 2-decimal values like "min_ms":1.70).
 func ms2(d time.Duration) float64 {
 	return math.Round(ms(d)*100) / 100

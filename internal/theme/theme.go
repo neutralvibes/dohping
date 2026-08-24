@@ -1,11 +1,11 @@
 // Package theme defines semantic color roles and the color enable/disable
-// rules (spec §11). Colors are keyed by role, never hardcoded in output
+// rules. Colors are keyed by role, never hardcoded in output
 // logic, and the default theme is trivially modifiable in one place.
 package theme
 
 import "dohping/internal/state"
 
-// Role is a semantic color role (spec §11.1).
+// Role is a semantic color role.
 type Role int
 
 const (
@@ -40,7 +40,7 @@ type Theme struct {
 	Fails                       string
 }
 
-// Default follows spec §11.2: up green, down red, unknown yellow, error
+// Default follows the theme contract: up green, down red, unknown yellow, error
 // magenta, header bold, timestamp default intensity (user correction
 // 2026-08-17: dim was too hard to read — the leading column needs no
 // extra muting), duration cyan, failure count red.
@@ -69,10 +69,9 @@ type Env struct {
 	TERM     string
 }
 
-// Enabled decides whether color output is active (spec §11.3). Disabled
+// Enabled decides whether color output is active. Disabled
 // when any of: --no-color / --color=never, NO_COLOR set non-empty,
-// stdout not a terminal, TERM=dumb. NO_COLOR overrides --color=always
-// (spec §11.3, §16.4).
+// stdout not a terminal, TERM=dumb. NO_COLOR overrides --color=always.
 func Enabled(cfg Config, isTTY bool, env Env) bool {
 	if cfg.NoColor || cfg.ColorMode == "never" {
 		return false

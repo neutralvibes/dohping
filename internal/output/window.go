@@ -10,7 +10,7 @@ import (
 	"dohping/internal/state"
 )
 
-// Window renders the fixed auto-scrolling window mode (spec §8): a bounded
+// Window renders the fixed auto-scrolling window mode: a bounded
 // block of the most recent status lines plus the current live line, drawn
 // in place on the normal terminal.
 //
@@ -19,11 +19,10 @@ import (
 // redraw moves the cursor back to the block's top row and rewrites the
 // block in place, clearing each line to its end so stale characters never
 // survive. Nothing else on screen is cleared or replaced: no alternate
-// screen, no cursor-home, no clear-to-end-of-screen (the spec never asks
-// for a screen clear — see DECISIONS #53). Content above and below the
-// window block is left exactly as it was.
+// screen, no cursor-home, no clear-to-end-of-screen. Content above and
+// below the window block is left exactly as it was.
 //
-// Terminal resize (DECISIONS #64): the block re-measures the terminal on
+// Terminal resize: the block re-measures the terminal on
 // EVERY redraw — width drives the HOST column (Layout.Resize: it expands
 // with available width, retracts to the 15-cell minimum, and truncates
 // long hosts with …), height drives the visible-line count, and the
@@ -36,23 +35,22 @@ import (
 // The state engine's event semantics are identical to the plain display;
 // only the rendering differs.
 //
-// REFLOWING terminals re-wrap the block on resize (see Display doc —
-// DECISIONS #67): when the width changes, the block FREEZES redraws until
-// the terminal settles, then restarts on a fresh row below the frozen
-// rendering; the old block stays in scrollback as history. The CPR
-// re-anchor (#66) was removed — ConPTY's cursor positions are unreliable
-// on resize (microsoft/terminal#18725). DECISIONS #70: the freeze is
-// CONDITIONAL — it fires only when the reflow would actually move the
-// block (any line of the last completed frame changes its physical row
-// count at the new width). A same-band resize (every line keeps its rows,
-// so a reflow leaves the block untouched) repaints in place at the new
-// columns instead of leaving a frozen block behind — but only after the
-// width has been stable for resizeSettleDelay (DECISIONS #73): an
+// REFLOWING terminals re-wrap the block on resize: when the width
+// changes, the block FREEZES redraws until the terminal settles, then
+// restarts on a fresh row below the frozen rendering; the old block stays
+// in scrollback as history. The CPR re-anchor was removed — ConPTY's
+// cursor positions are unreliable on resize (microsoft/terminal#18725).
+// The freeze is CONDITIONAL — it fires only when the reflow would
+// actually move the block (any line of the last completed frame changes
+// its physical row count at the new width). A same-band resize (every
+// line keeps its rows, so a reflow leaves the block untouched) repaints
+// in place at the new columns instead of leaving a frozen block behind —
+// but only after the width has been stable for resizeSettleDelay: an
 // event-timed redraw landing mid-reflow writes to a canvas that is still
 // moving, which shifts the block by a row. Same-band repaints are
 // deferred, never restarted.
 //
-// REFLOW-AWARE RECLAIM (SPEC-window-resize-reclaim.md): a CROSSING that
+// REFLOW-AWARE RECLAIM: a CROSSING that
 // settles above the essentials floor no longer freezes either. The
 // terminal reflows the on-screen frame to a known span — R = Σ
 // physicalRows(cellWidth(row), tw) over the last completed frame's rows,
@@ -60,8 +58,8 @@ import (
 // follows its content through the reflow, so the reflowed frame's top is
 // exactly R−1 rows above the cursor. The block is therefore RECLAIMED in
 // place: walk back R−1, rewrite the fresh trimmed frame, clear the
-// R−N stale rows. No frozen copy, no restart, no scrollback reliance
-// (SPECIFICATION.md §8.5). The freeze survives only below the essentials
+// R−N stale rows. No frozen copy, no restart, no scrollback reliance.
+// The freeze survives only below the essentials
 // floor, where the fresh frame itself wraps and its reflowed span can
 // exceed the screen (R > th — the anchor is unknowable then).
 type Window struct {
@@ -82,8 +80,8 @@ type Window struct {
 	resizeSince   time.Time // when the current width change was first observed
 	resizePending bool      // width changed (crossing); redraws frozen until the terminal settles
 	lastRows      []string  // rendered rows of the last COMPLETED frame (resize reflow check)
-	deferPending  bool      // same-band width change; repaints deferred until the width settles (#73)
-	reclaimRows   int       // crossing settled above the floor: reflowed span of the on-screen frame to reclaim in place (SPEC-window-resize-reclaim)
+	deferPending  bool      // same-band width change; repaints deferred until the width settles
+	reclaimRows   int       // crossing settled above the floor: reflowed span of the on-screen frame to reclaim in place
 	forceRender   bool      // finalize: render now regardless of the settle window
 }
 
@@ -106,7 +104,7 @@ func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, siz
 func (w *Window) SetNow(f func() time.Time) { w.now = f }
 
 // Enter is a no-op: the window renders in place on the normal terminal and
-// takes over no screen state, so there is nothing to enter (DECISIONS #53).
+// takes over no screen state, so there is nothing to enter.
 func (w *Window) Enter() {}
 
 // Exit is a no-op for the same reason: the block is left visible on the
@@ -155,9 +153,8 @@ func (w *Window) Finalize() {
 	w.cur = nil
 	// A resize in flight forces the render: the final block must land
 	// NOW, not after the settle window — reclaimed in place when the
-	// crossing is reclaimable, restarted below otherwise (DECISIONS #67,
-	// SPEC-window-resize-reclaim.md). The same-band defer (#73) is
-	// cleared for the same reason.
+	// crossing is reclaimable, restarted below otherwise. The same-band
+	// defer is cleared for the same reason.
 	w.forceRender = true
 	w.Redraw()
 	w.forceRender = false
@@ -183,7 +180,7 @@ func (w *Window) Tick() {
 // are fewer events than the window holds, so the block never grows into
 // the terminal and never relies on scrollback.
 //
-// Every redraw re-measures the terminal (DECISIONS #64): width re-computes
+// Every redraw re-measures the terminal: width re-computes
 // the HOST column, height re-computes the visible-line count, and each
 // row's PHYSICAL span is counted (a line wider than the terminal wraps,
 // so the cursor-up count and stale-row clearing are in physical rows, not
@@ -196,16 +193,16 @@ func (w *Window) Redraw() {
 	if w.sizeFn != nil {
 		tw, th = w.sizeFn()
 	}
-	// RESIZE (DECISIONS #67 + #70): freeze redraws while the width is
+	// RESIZE: freeze redraws while the width is
 	// settling — a reflowing terminal re-wraps the block and its position
-	// is unknowable mid-reflow (the CPR re-anchor of #66 failed on ConPTY,
+	// is unknowable mid-reflow (the CPR re-anchor failed on ConPTY,
 	// which reports unreliable cursor positions — microsoft/terminal
-	// #18725). The freeze is conditional (#70): only a width change that
+	// #18725). The freeze is conditional: only a width change that
 	// would MOVE the last completed frame (a line crossing a wrap
 	// boundary) freezes; same-band changes repaint in place. Once settled,
 	// restart the block on a fresh row below the frozen rendering; the
 	// old block stays in scrollback as history.
-	// Debug forensics (DECISIONS #74): redraws during a resize episode
+	// Debug forensics: redraws during a resize episode
 	// are logged — the suppressed and deferred ones are the evidence
 	// that no write landed mid-reflow, and the settle repaint records
 	// the block's physical span against the previous frame's (a span
@@ -217,7 +214,7 @@ func (w *Window) Redraw() {
 		return // mid-reflow: defer the redraw
 	}
 	if w.deferPending {
-		// Same-band resize (DECISIONS #73): the reflow cannot move the
+		// Same-band resize: the reflow cannot move the
 		// block, but the terminal is mid-reflow right now — writing now
 		// lands on a canvas that is still moving. Defer the in-place
 		// repaint until the width has been stable for resizeSettleDelay,
@@ -269,13 +266,13 @@ func (w *Window) Redraw() {
 		totalPhys += physicalRows(cellWidth(s), tw)
 	}
 
-	// Settled crossing (REFLOW-AWARE RECLAIM, SPEC-window-resize-reclaim
-	// .md): the terminal has re-wrapped the on-screen frame to R rows —
+	// Settled crossing (REFLOW-AWARE RECLAIM): the terminal has
+	// re-wrapped the on-screen frame to R rows —
 	// reflowedSpan of the last completed frame at the new width — and the
 	// cursor followed its content, so the frame's top is exactly R−1 rows
 	// above the cursor. Reclaim it in place: walk back R−1, overwrite
 	// with the fresh trimmed frame, clear the R−N stale rows. No frozen
-	// copy, no restart, no scrollback reliance (§8.5). The freeze remains
+	// copy, no restart, no scrollback reliance. The freeze remains
 	// the fallback when the fresh frame itself wraps (below the essentials
 	// floor — its anchor is unknowable) or when the reflowed span cannot
 	// fit the screen (R > th).
@@ -296,8 +293,8 @@ func (w *Window) Redraw() {
 		w.resizePending = false
 	}
 
-	// Reflowing-terminal re-anchor was removed with the CPR machinery
-	// (DECISIONS #67): ConPTY's cursor positions are unreliable on resize,
+	// Reflowing-terminal re-anchor was removed with the CPR machinery:
+	// ConPTY's cursor positions are unreliable on resize,
 	// so the block never reclaims a reflowed rendering via a query — the
 	// reclaim above needs no answer, only the app's own R math.
 
@@ -310,7 +307,7 @@ func (w *Window) Redraw() {
 		// The cursor sits on the last physical row of the previous block;
 		// move it back to the block's top row AND to column 0. Cursor-up
 		// alone preserves the column, which would start every row mid-line
-		// and leave stale fragments on screen (user report, DECISIONS #54).
+		// and leave stale fragments on screen (user report).
 		fmt.Fprintf(&sb, "\x1b[%dA\r", walkBack-1)
 	}
 	for i, s := range rowStrs {
@@ -318,7 +315,7 @@ func (w *Window) Redraw() {
 		sb.WriteString("\x1b[K") // clear this row to its end (stale chars)
 		if i < len(rowStrs)-1 {
 			// Rows separated by CRLF — bare LF moves down without
-			// resetting the column (DECISIONS #54).
+			// resetting the column.
 			sb.WriteString("\r\n")
 		}
 	}
@@ -327,7 +324,7 @@ func (w *Window) Redraw() {
 	// cursor to the new last row. Each clear resets to column 0 first:
 	// cursor-down preserves the column, and the cursor may sit at the end
 	// of a non-blank last row (full window), so ESC[K alone would only
-	// clear from that column and leave the stale text (DECISIONS #65).
+	// clear from that column and leave the stale text.
 	staleClear := w.lastPhysRows
 	if w.reclaimRows > 0 {
 		staleClear = w.reclaimRows
@@ -366,7 +363,7 @@ func physicalRows(cells, termWidth int) int {
 // reflowedSpan is the physical span the given frame's rows would occupy
 // if the terminal re-wrapped them at tw — the height of the on-screen
 // block after a reflow, and therefore the anchor math for the in-place
-// reclaim (SPEC-window-resize-reclaim.md §3.1): the cursor follows its
+// reclaim: the cursor follows its
 // content through the reflow, so the reflowed frame's top is exactly
 // reflowedSpan−1 rows above it.
 func reflowedSpan(rows []string, tw int) int {
@@ -379,10 +376,9 @@ func reflowedSpan(rows []string, tw int) int {
 
 // freshFits reports whether every row of the fresh frame fits on a single
 // physical row at tw — the essentials-floor test. Above the floor the
-// trim (DECISIONS #71) guarantees it, so a reclaim leaves a clean block;
+// column trim guarantees it, so a reclaim leaves a clean block;
 // below it the fresh frame wraps by design and its reflowed anchor is
-// unknowable, so the freeze fallback applies (SPEC-window-resize-reclaim
-// .md §3.2).
+// unknowable, so the freeze fallback applies.
 func freshFits(rows []string, tw int) bool {
 	if tw <= 0 {
 		return false
@@ -404,7 +400,7 @@ func (w *Window) resizeSettled() bool {
 }
 
 // visibleLines returns how many data lines fit: the configured window
-// size, reduced when the terminal is too small (spec §8.5), never below 1.
+// size, reduced when the terminal is too small, never below 1.
 func (w *Window) visibleLines() int {
 	_, th := w.terminalSize()
 	return w.visibleLinesFrom(th)
@@ -435,10 +431,9 @@ func (w *Window) terminalSize() (int, int) {
 }
 
 // observeResize records a width change and decides how the block must
-// behave (DECISIONS #67 + #70 + #73, SPEC-window-resize-reclaim.md). A
-// reflowing terminal re-wraps existing lines on width change, but a line
-// that keeps its physical row count cannot move in a reflow (it fits in
-// the same rows at both widths — the DECISIONS #68 safety reasoning,
+// behave. A reflowing terminal re-wraps existing lines on width change,
+// but a line that keeps its physical row count cannot move in a reflow
+// (it fits in the same rows at both widths — the same safety reasoning,
 // generalized from one line to the whole block). So: if any row of the
 // last COMPLETED frame changes its physical row count at the new width,
 // the block would move — redraws FREEZE until the width has been stable
@@ -447,7 +442,7 @@ func (w *Window) terminalSize() (int, int) {
 // exactly known) and a restart below the frozen rendering (below the
 // floor / when the reflowed span exceeds the screen). If every row keeps
 // its count, the block may be reclaimed in place — but the repaint is
-// DEFERRED for the same settle delay (#73), so no event-timed redraw
+// DEFERRED for the same settle delay, so no event-timed redraw
 // lands mid-reflow. While either is pending, every further width change
 // restarts the settle clock (a drag extends the hold). The first
 // observation only calibrates lastWidth; no decision runs before a frame
@@ -467,7 +462,7 @@ func (w *Window) observeResize(tw int) {
 	w.lastWidth = tw
 	if w.resizePending {
 		// Already pending: keep holding and restart the settle clock —
-		// a drag across further widths extends the hold (#67 behavior).
+		// a drag across further widths extends the hold.
 		w.resizeSince = w.now()
 		debugx.Debugf("resize", "drag: %d→%d (settle clock restarted)", old, tw)
 		return
@@ -489,8 +484,8 @@ func (w *Window) observeResize(tw int) {
 		// now, and an event-timed redraw (probe/tick) landing mid-reflow
 		// writes to a canvas that is still moving, shifting the block by
 		// a row (user report: "when it wraps it creates another area to
-		// write to"). Defer the repaint until the width settles (DECISIONS
-		// #73) — the same hold the plain display has, without a frozen
+		// write to"). Defer the repaint until the width settles —
+		// the same hold the plain display has, without a frozen
 		// block or restart.
 		w.resizeSince = w.now()
 		w.deferPending = true
@@ -500,7 +495,7 @@ func (w *Window) observeResize(tw int) {
 
 // resizeRestart moves the block below the frozen (re-wrapped) rendering
 // and resets the wrap bookkeeping to the fresh row. No-op unless a resize
-// is pending (DECISIONS #67).
+// is pending.
 func (w *Window) resizeRestart() {
 	if !w.resizePending {
 		return
@@ -525,7 +520,7 @@ func (w *Window) finalizeLine(ev state.Event) {
 }
 
 // pushHistory appends a finalized line, dropping the oldest beyond the
-// window's history capacity (spec §8.4).
+// window's history capacity.
 func (w *Window) pushHistory(ln Line) {
 	w.history = append(w.history, ln)
 	cap := w.lines - 1

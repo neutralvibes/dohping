@@ -106,7 +106,7 @@ func TestTextFormatError(t *testing.T) {
 
 // TestCSVParseable verifies the CSV text format is genuinely machine-readable:
 // every produced line parses back into exactly 8 fields, and the unavailable
-// cells on a down line come back as empty strings (spec §14.4).
+// cells on a down line come back as empty strings.
 func TestCSVParseable(t *testing.T) {
 	l := &Logger{format: "csv", host: "192.168.1.23"}
 	for _, e := range []Entry{upEntry(), downEntry(), {Time: t0(), Host: "192.168.1.23", Status: state.StatusError, Duration: 3 * time.Second}} {
@@ -146,7 +146,7 @@ func TestJSONFormatParseable(t *testing.T) {
 	if m["min_ms"] != 1.7 || m["max_ms"] != 5.9 || m["avg_ms"] != 2.7 {
 		t.Errorf("json rtt fields wrong: %v", m)
 	}
-	// Two-decimal rounding (spec §14.5).
+	// Two-decimal rounding.
 	sub := Entry{Time: t0(), Host: "h", Status: state.StatusUp, Duration: time.Second,
 		Stats: state.Stats{Count: 1, Min: 199399 * time.Nanosecond, Max: 199399 * time.Nanosecond, Sum: 199399 * time.Nanosecond}}
 	got = strings.TrimSpace(l.jsonLine(sub))
