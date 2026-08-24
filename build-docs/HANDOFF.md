@@ -2,13 +2,48 @@
 
 Read order: this file first, then `SPECIFICATION.md` (the contract),
 `DECISIONS.md` (fix rationale), `CHECKPOINT.md` (gate status),
-`PROGRESS.md` (timeline), `SPEC-window-resize-reclaim.md` (shipped resize
-design). `README.md` is the user-facing doc.
+`PROGRESS.md` (timeline). `README.md` is the user-facing doc.
+(`SPEC-window-resize-reclaim.md` was deleted when the reclaim shipped.)
 
 **Status: build complete. All 6 phases green. Resize resolved (#78 shipped),
 state-change clobber fixed + accepted (#79). README v2 with hero GIF baked in
-(2026-08-24). Publish gate: PR #1 open, CI nursed green, final push/PR still
-user-approved + parked.**
+(2026-08-24). Plain log format is now CSV (#80). Published-source scrub done
+(#81). Publish gate: re-derive publish/, push branch, PR — still user-approved
++ parked.**
+
+---
+
+## SESSION 2026-08-24 (later) — CSV log format + published-source scrub
+
+Two changes landed after the README-v2 session:
+
+1. **Plain log format is CSV** (DECISIONS #80): `--log-format csv|json`
+   (default `csv`, the `text` value is REPLACED). Columns
+   `timestamp,address,state,duration_seconds,min_ms,max_ms,avg_ms,fails` —
+   address before state, duration in raw seconds, unavailable fields as
+   empty cells. JSON unchanged. Spec §14.3/§14.4, README, help, CLI
+   validation, `logx` renderer + tests, and the app signal tests updated.
+   Verified end-to-end: `2026-08-24T18:27:38+01:00,127.0.0.1,up,1,0.22,0.36,0.29,0`.
+   Commit `a1f4fc3`.
+
+2. **Published-source scrub** (DECISIONS #81): removed all references to
+   unpublished docs from public source — DECISIONS #N, SPEC-window, and
+   `spec §N` citations, 134 refs across 15 files — rewritten as
+   self-contained prose. The internal SPECIFICATION.md is FORBIDDEN from
+   publish/ (it's in publish-github.sh's FORBIDDEN list), so `spec §N`
+   refs were dangling too. Zero behavioral change. Commit `76deeb4`.
+   Lesson: the earlier "scrub intact" claim only covered prose, not Go
+   comments — verify with `grep -rniE 'decisions|spec-window|specification|spec §' internal/ cmd/ README.md docs/`
+   before any publish.
+
+Both gates green (gofmt, vet, race, golangci-lint, staticcheck, gosec,
+govulncheck). Working tree clean on `master`.
+
+**NEXT (parked, user-approved):** re-derive `publish/` (now includes the CSV
+change + the scrub), push `publish-initial`, open PR, WATCH CI TO GREEN, tag
+v0.1.0 + release with plain-named assets + SHA256SUMS. Before pushing,
+consult `build-docs/PUBLISH-CHECKLIST.md` (identity, wording, tags) and
+re-verify the scrub grep. LICENSE holder line still `<YOUR NAME HERE>`.
 
 ---
 
