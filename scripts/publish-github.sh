@@ -31,6 +31,8 @@ PUBLIC_ITEMS=(
   go.sum
   cmd
   internal
+  docs
+  assets
   scripts/release.sh
   scripts/pty-resize-probe.py
   .github/workflows/ci.yml
