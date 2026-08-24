@@ -4,3 +4,9 @@ publish/
 
 # local state
 .notify-state
+
+# dev-only demo pipeline (never published — see HANDOFF §demo GIF)
+scripts/compose-hero-demo.py
+scripts/record-hero-demo.py
+scripts/record-shell-demo.py
+build-docs/README-v2-draft.md
