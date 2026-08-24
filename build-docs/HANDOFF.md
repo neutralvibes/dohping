@@ -6,16 +6,17 @@ Read order: this file first, then `LAUNCH.md` (build brief), `SPECIFICATION.md`
 `SPEC-window-resize-reclaim.md` is the design for the shipped resize behavior.
 
 **Status: build complete. All 6 phases green. Window-mode resize is RESOLVED —
-the reflow-aware in-place reclaim is SHIPPED (DECISIONS #78; dist sha
-8dcce21a…, byte-reproduced via `release.sh`).**
+the reflow-aware in-place reclaim is SHIPPED (DECISIONS #78).**
 
-**2026-08-23: plain-mode state-change clobber FIXED (DECISIONS #79).**
+**2026-08-23: plain-mode state-change clobber FIXED and ACCEPTED (DECISIONS #79).**
 `printFinalized` marked the row above the live line with `-` (the #68 resize
 artifact) on EVERY status change, not just resizes — the header was replaced
 by `-` on the first flip and history never accumulated ("only shows 2 lines
-at a time"). Caught by the user's host up/down script for the README GIF.
-Fix + `TestDisplayStatusChangeKeepsHistory` committed; dist sha
-`0ac183e1…`.
+at a time"). Caught by the user's host up/down script for the README GIF;
+the correct behavior had not been locked down as a test. Fix +
+`TestDisplayStatusChangeKeepsHistory` committed; dist sha `8159f3e9…`.
+ACCEPTED 2026-08-23 after ~40 state changes + restarts + resize. The rig
+now carries current builds only (five platform binaries, #79-fixed source).
 
 **PUBLISH-GATE STATUS (2026-08-21 session): in progress — PR #1 open, CI
 being nursed to green. Read the "SESSION 2026-08-21" section below FIRST if
@@ -295,9 +296,10 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   name is the latest SHIPPED build. Windows renames same-name re-downloads
   ("(1)"), which once caused a stale-binary test to wrongly reject a build —
   never rely on the plain name alone for a test round; tell the user the exact
-  versioned filename (or the sha) to download. Current: plain name AND
-  `dohping-linux-amd64-8dcce21a` = shipped reclaim; `dohping-linux-amd64-0014967e`
-  = REJECTED B, retained as a versioned artifact.
+  versioned filename (or the sha) to download. As of 2026-08-23 the rig
+  carries CURRENT BUILDS ONLY (no versioned duplicates): plain names only,
+  five platform binaries, all 0.1.0 from the #79-fixed source. Superseded
+  linux builds (8dcce21a, 0014967e) and the src tarball were removed.
 - GitHub release assets use PLAIN names (`dohping-<os>-<arch>`) — the sha
   prefix is a rig/local-testing convention only (decided 2026-08-19; see
   PUBLISH-CHECKLIST.md judgment gates).
@@ -305,8 +307,9 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS: GOROOT before PATH expor
   then verify `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" \
   https://files.hermes.home/dohping/dohping-linux-amd64` → 200, and compare
   `sha256sum` served-vs-dist.
-- Current published linux-amd64 sha: `8dcce21a73fa…` (2026-08-18, round #78:
-  reflow-aware reclaim SHIPPED; served = dist, verified byte-identical over TLS).
+- Current published linux-amd64 sha: `8159f3e9c38d…` (2026-08-23, #79 fix
+  ACCEPTED; served = dist, verified byte-identical over TLS). All five
+  platform binaries refreshed from the #79-fixed source and byte-verified.
 - Full rig knowledge: skill `file-serve-rig`.
 
 ## 7. Test/debug workflow that works
