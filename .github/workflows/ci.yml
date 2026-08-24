@@ -152,3 +152,4 @@ jobs:
           files: dist/*
           generate_release_notes: false
           fail_on_unmatched_files: true
+          draft: true
