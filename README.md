@@ -121,7 +121,7 @@ Display:
 
 Logging:
   -l, --log-file PATH        Append status events to a file
-      --log-format FORMAT    Log format: text | json (default text)
+      --log-format FORMAT    Log format: csv | json (default csv)
 
 Exit codes:
   0    Normal completion
@@ -197,10 +197,11 @@ A fixed block of the most recent lines plus the current live line, drawn in plac
 
 `--log-file PATH` appends one line per finalized status event. Logging is independent of `--quiet`.
 
-**Text:**
+**CSV:**
 
 ```text
-2026-08-16T11:00:35+01:00 host=192.168.1.23 status=up duration_seconds=2126 min_ms=1.70 max_ms=5.90 avg_ms=2.70 fails=0
+2026-08-16T11:00:35+01:00,192.168.1.23,up,2126,1.70,5.90,2.70,0
+2026-08-16T11:05:23+01:00,192.168.1.23,down,65,,,,23
 ```
 
 **JSON:**

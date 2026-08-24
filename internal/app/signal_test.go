@@ -42,7 +42,7 @@ func TestSIGINTExits130(t *testing.T) {
 	if err != nil {
 		t.Fatalf("log missing: %v", err)
 	}
-	if !strings.Contains(string(data), "status=up") {
+	if !strings.Contains(string(data), ",up,") {
 		t.Errorf("log not flushed: %q", data)
 	}
 	if strings.Contains(string(data), "\x1b") {
@@ -67,7 +67,7 @@ func TestSIGTERMExits143(t *testing.T) {
 		t.Fatalf("exit = %d, want %d", code, ExitTerminated)
 	}
 	data, _ := os.ReadFile(logPath)
-	if !strings.Contains(string(data), "status=up") {
+	if !strings.Contains(string(data), ",up,") {
 		t.Errorf("log not flushed on SIGTERM: %q", data)
 	}
 }
@@ -96,7 +96,7 @@ func TestQuietStillLogs(t *testing.T) {
 		t.Errorf("quiet run wrote stdout: %q", stdout.String())
 	}
 	data, _ := os.ReadFile(logPath)
-	if !strings.Contains(string(data), "status=up") {
+	if !strings.Contains(string(data), ",up,") {
 		t.Errorf("quiet run did not log: %q", data)
 	}
 }

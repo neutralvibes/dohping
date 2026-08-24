@@ -51,7 +51,7 @@ Display:
 
 Logging:
   -l, --log-file PATH        Append finalized status events to PATH
-      --log-format FORMAT    Log format: text | json (default text)
+      --log-format FORMAT    Log format: csv | json (default csv)
 
 Exit codes:
   0    normal completion (--count exhausted or interactive q quit)

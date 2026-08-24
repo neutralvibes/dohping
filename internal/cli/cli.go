@@ -27,7 +27,7 @@ const (
 	DefaultProbe          = "icmp"
 	DefaultColorMode      = "auto"
 	DefaultLiveMode       = "auto"
-	DefaultLogFormat      = "text"
+	DefaultLogFormat      = "csv"
 	DefaultTimestampFmt   = "HH:MM:SS"
 	MaxHostWidth          = 40
 	MinHostWidth          = 15
@@ -75,7 +75,7 @@ type Options struct {
 	UpAfter   int
 
 	LogFile   string
-	LogFormat string // text | json
+	LogFormat string // csv | json
 
 	TimestampFormat string // HH:MM:SS | rfc3339
 
@@ -318,9 +318,9 @@ func validate(opts *Options) error {
 		return usageErrorf("invalid live mode %q: must be auto, on, or off", opts.LiveMode)
 	}
 	switch opts.LogFormat {
-	case "text", "json":
+	case "csv", "json":
 	default:
-		return usageErrorf("invalid log format %q: must be text or json", opts.LogFormat)
+		return usageErrorf("invalid log format %q: must be csv or json", opts.LogFormat)
 	}
 	switch opts.TimestampFormat {
 	case "HH:MM:SS", "rfc3339":

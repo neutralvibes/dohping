@@ -608,37 +608,56 @@ At minimum, each log event should include:
 
 ### 14.3 Log Format
 
+The plain (text) log format is CSV: one status event per line, comma-separated
+columns, address before state, duration in raw seconds, and unavailable fields
+left as empty cells. It is machine-readable (a CSV parser reads empty cells as
+"not applicable") while remaining human-friendly.
+
 Default log format:
 
 ```text
-text
+csv
 ```
 
-Optional future or implemented format:
+Optional format:
 
 ```text
 json
 ```
 
-Suggested option:
+Option:
 
 ```text
---log-format text|json
+--log-format csv|json
 ```
 
 Default:
 
 ```text
---log-format text
+--log-format csv
 ```
 
-### 14.4 Text Log Example
+### 14.4 CSV Log Example
 
 ```text
-2026-08-16T11:00:35+01:00 host=192.168.1.23 status=up duration_seconds=2126 min_ms=1.70 max_ms=5.90 avg_ms=2.70 fails=0
-2026-08-16T11:05:23+01:00 host=192.168.1.23 status=down duration_seconds=65 fails=23
-2026-08-16T13:34:11+01:00 host=192.168.1.23 status=up duration_seconds=175226 min_ms=1.00 max_ms=2.50 avg_ms=1.70 fails=0
+2026-08-16T11:00:35+01:00,192.168.1.23,up,2126,1.70,5.90,2.70,0
+2026-08-16T11:05:23+01:00,192.168.1.23,down,65,,,,23
+2026-08-16T13:34:11+01:00,192.168.1.23,up,175226,1.00,2.50,1.70,0
 ```
+
+Columns, in order:
+
+```text
+timestamp,address,state,duration_seconds,min_ms,max_ms,avg_ms,fails
+```
+
+- `timestamp`: RFC 3339 time the status began.
+- `address`: target host, IPv6 literals bracketed (`[::1]`).
+- `state`: `up`, `down`, `?` (not yet established), or `error`.
+- `duration_seconds`: whole seconds spent in the status.
+- `min_ms`, `max_ms`, `avg_ms`: RTT in milliseconds, two decimals, present only
+  when the status is `up`.
+- `fails`: consecutive failed probes, present only when the status is `down`.
 
 ### 14.5 JSON Log Example
 
