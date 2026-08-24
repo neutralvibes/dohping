@@ -12,6 +12,7 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -122,3 +123,33 @@ jobs:
 
       - name: go test (unit only — probe is POSIX, race not run on Windows)
         run: go test ./...
+
+  # Release: on a version tag, run the full gate, build the matrix, and
+  # attach the binaries + checksums to the tag's GitHub Release. The
+  # release artifact is CI-built, so it is the same tree that just passed
+  # the gate on a clean runner — never a locally-built binary.
+  release:
+    name: Release
+    needs: [gate, gate-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Release matrix + checksums
+        run: bash scripts/release.sh
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          draft: true
