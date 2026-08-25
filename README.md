@@ -85,7 +85,13 @@ Artifacts land in `dist/` as `dohping-<os>-<arch>` plus `SHA256SUMS`.
 
 ### Linux installation
 
-Download the Linux binary for your architecture from the [releases page](https://github.com/neutralvibes/dohping/releases). To install it for all users:
+Download the Linux archive for your architecture from the [releases page](https://github.com/neutralvibes/dohping/releases). It is named like `dohping_<version>_linux_<arch>.tar.gz`. The binary inside is named `dohping`. Extract it:
+
+```sh
+tar -xzf dohping_*.tar.gz
+```
+
+This unpacks the binary plus a copy of this README, the changelog, and the license. To install it for all users:
 
 ```sh
 sudo mv dohping /usr/local/bin/
