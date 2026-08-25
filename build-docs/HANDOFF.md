@@ -128,11 +128,15 @@ scan, and I never noticed — I only surfaced it as "advice" after releases.
   golang/vuln releases carry NO assets; my first attempt 404'd) and run
   `govulncheck ./...` in the gate. Local gate verified GREEN (govulncheck:
   "No vulnerabilities found"; 1+7 in uncalled imports, not reached).
-- **ROOT CAUSE (structural, worth fixing):** the gate is DUPLICATED —
-  scripts/check.sh and the inline ci.yml gate steps are two definitions of
-  "green" that drifted apart. That's how govulncheck silently fell out of CI.
-  Proposal on the table: have CI call scripts/check.sh (single source of truth)
-  so dev and release can never diverge again. NOT yet done — user decision.
+- **ROOT CAUSE (structural, FIXED #91):** the gate was DUPLICATED — scripts/check.sh
+  and the inline ci.yml gate steps were two definitions of "green" that drifted
+  apart. That's how govulncheck silently fell out of CI. FIX: CI's Quality gate
+  now runs `bash scripts/check.sh --ci` — ONE definition everywhere, with args
+  for environment-specific behaviour (user's design): no-args (local/release.sh)
+  SKIPs optional tools not installed; `--ci` FAILs on a missing tool because the
+  runner is expected to have provisioned it. The install steps + CI-only
+  verification (fresh build, debug-compiled-out, PTY probe, release matrix) stay
+  as separate steps, explicitly not part of the green definition.
 - **User's broader point (carry forward):** the agent keeps surfacing things as
   "advice" after the fact (LICENSE holder, govulncheck) that should have been
   caught by the system itself. The LICENSE holder was NEVER blank — commit
