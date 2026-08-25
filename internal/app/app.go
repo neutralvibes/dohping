@@ -130,7 +130,8 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	}
 
 	colorEnabled := theme.Enabled(theme.Config{NoColor: opts.NoColor, ColorMode: opts.ColorMode},
-		tty.Stdout, theme.Env{NO_COLOR: os.Getenv("NO_COLOR"), TERM: os.Getenv("TERM")})
+		tty.Stdout, theme.Env{NO_COLOR: os.Getenv("NO_COLOR"), TERM: os.Getenv("TERM"),
+			WT_SESSION: os.Getenv("WT_SESSION"), TERM_PROGRAM: os.Getenv("TERM_PROGRAM")})
 	th := theme.NewRenderer(colorEnabled, theme.Default)
 	layout := output.NewLayout(opts.Host, opts.TimestampFormat, th)
 
