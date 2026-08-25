@@ -92,10 +92,11 @@ No em-dashes, human prose.
      source, Defender exclusion for local compiles, "Allow on device" in
      Windows Security.
 - CHANGELOG `[Unreleased]` carries both changes.
-- **The v0.1.2 ship-vs-defer call is NOT made** — user flagged that neither
-  the signing remark nor the note constitutes a ship decision. Do not assume;
-  ask when the release is ready. (2026-08-25: an earlier DECISIONS draft
-  stamped it decided; corrected at the user's signal.)
+- **The v0.1.2 ship-vs-defer call is RESOLVED: Windows SHIPS** (user decision
+  2026-08-25: "windows wont be deferred, the README handles it for now"). The
+  README Defender note is the documentation; no signing (cost doesn't pay back),
+  no deferral. (An earlier DECISIONS draft stamped it decided prematurely; the
+  user flagged that, and now the user has genuinely decided.)
 - **Windows build published to the rig (2026-08-25, user asked):**
   `https://files.hermes.home/projects/dohping/` (the REAL rig location — see
   §6) — `dohping-windows-amd64-f6ea1c7d.exe` (stripped, the verified #87
