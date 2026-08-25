@@ -85,14 +85,20 @@ Artifacts land in `dist/` as `dohping-<os>-<arch>` plus `SHA256SUMS`.
 
 ### Running without sudo (Linux / Raspberry Pi)
 
-Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. If you run `dohping` as a normal user you may see a permission error. Rather than use `sudo` every time, you can grant the binary the single privilege it needs:
+Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. On most distributions this is handled by giving `ping` itself the privilege, so your user account can already run `ping` without sudo. `dohping` detects that and falls back to the system `ping` command, so on a typical Linux or Raspberry Pi OS setup it works with no configuration at all.
+
+If `dohping` does report a permission error, you have two options:
+
+The modern way is Linux capabilities, a single fine-grained privilege granted to the binary:
 
 ```sh
 sudo mv dohping /usr/local/bin/
 sudo setcap cap_net_raw=+ep /usr/local/bin/dohping
 ```
 
-After that, any user can run `dohping` safely. `dohping` also falls back to the system `ping` command when it cannot open a socket directly, so on systems where `ping` works for your user (for example Raspberry Pi OS, which ships `ping` already privileged) `dohping` usually works with no setup at all. If ICMP is blocked entirely, `--probe tcp` needs no privileges.
+After that, any user can run `dohping` safely. Capabilities are supported on all current Linux and Raspberry Pi OS releases (note that Raspberry Pi OS ships its `ping` with the older setuid bit set rather than a capability, which is why plain `ping` already works there).
+
+If ICMP is blocked entirely, `--probe tcp` needs no privileges.
 
 ## When to use it
 
