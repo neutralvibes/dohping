@@ -7,7 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.1.1] - 2026-08-25
 
 ### Added
-- ARM support. dohping now ships for 32-bit ARM (armv7) and 64-bit ARM
+- ARM support. dohping now ships for 32-bit ARM (armv6 for the original
+  Raspberry Pi and Pi Zero, armv7 for newer 32-bit boards) and 64-bit ARM
   (arm64) on every platform that supports them, so it runs on Raspberry Pi
   and other ARM devices.
 - Release archives carry the docs with the binary: `README.md`,
