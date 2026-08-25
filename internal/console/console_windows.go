@@ -26,6 +26,18 @@ func EnableVT() {
 	enable(os.Stderr)
 }
 
+// SupportsUnicodeGlyphs reports whether the console can render the Unicode
+// block glyphs used by the liveness animation. Classic cmd.exe and
+// PowerShell use codepage fonts without them, so they return false and the
+// app falls back to an ASCII spinner. Windows Terminal and VS Code set a
+// marker and render the glyphs fine.
+func SupportsUnicodeGlyphs() bool {
+	if os.Getenv("WT_SESSION") != "" || os.Getenv("TERM_PROGRAM") != "" || os.Getenv("TERM") != "" {
+		return true
+	}
+	return false
+}
+
 func enable(f *os.File) {
 	h := windows.Handle(f.Fd())
 	var mode uint32
