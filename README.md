@@ -83,16 +83,30 @@ go build -o dohping ./cmd/dohping
 
 Artifacts land in `dist/` as `dohping-<os>-<arch>` plus `SHA256SUMS`.
 
-### Running without sudo (Linux / Raspberry Pi)
+### Linux installation
 
-Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. On most distributions this is handled by giving `ping` itself the privilege, so your user account can already run `ping` without sudo. `dohping` detects that and falls back to the system `ping` command, so on a typical Linux or Raspberry Pi OS setup it works with no configuration at all.
-
-If `dohping` does report a permission error, you have two options:
-
-The modern way is Linux capabilities, a single fine-grained privilege granted to the binary:
+Download the Linux binary for your architecture from the [releases page](https://github.com/neutralvibes/dohping/releases). To install it for all users:
 
 ```sh
 sudo mv dohping /usr/local/bin/
+```
+
+To install it for your user only (no sudo needed):
+
+```sh
+mkdir -p ~/.local/bin
+mv dohping ~/.local/bin/
+```
+
+`~/.local/bin` is on the default PATH on Debian and Raspberry Pi OS. On other distributions you may need to add it to `PATH`.
+
+### Permissions
+
+Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. On most distributions this is handled by giving `ping` itself the privilege, so your user account can already run `ping` without sudo. `dohping` detects that and falls back to the system `ping` command, so on a typical Linux or Raspberry Pi OS setup it should work with no configuration at all. Distros differ on how `ping` gets its privileges, and several are moving to stricter defaults, so this depends on the distribution.
+
+If `dohping` does report a permission error, the modern fix is a single fine-grained privilege granted to the binary:
+
+```sh
 sudo setcap cap_net_raw=+ep /usr/local/bin/dohping
 ```
 
