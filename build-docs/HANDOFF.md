@@ -93,12 +93,15 @@ No em-dashes, human prose.
   ask when the release is ready. (2026-08-25: an earlier DECISIONS draft
   stamped it decided; corrected at the user's signal.)
 - **Windows build published to the rig (2026-08-25, user asked):**
-  `https://files.hermes.home/dohping/` — `dohping-windows-amd64-f6ea1c7d.exe`
-  (stripped, the verified #87 build; plain name `dohping-windows-amd64.exe`
-  aliases it), plus `dohping_0.1.1_windows_amd64.zip` and
-  `dohping_0.1.1_windows_arm64.zip` release archives, and an INDEX.txt.
-  Verified: 200 via `/raw/`, exe sha matches f6ea1c7d, zip sha 6aaec1df,
-  no-store header served.
+  `https://files.hermes.home/projects/dohping/` (the REAL rig location — see
+  §6) — `dohping-windows-amd64-f6ea1c7d.exe` (stripped, the verified #87
+  build; plain name `dohping-windows-amd64.exe` now aliases it), plus
+  `dohping_0.1.1_windows_amd64.zip` and `dohping_0.1.1_windows_arm64.zip`
+  release archives, and the README with the Defender note. INDEX.txt +
+  SHA256SUMS updated. Verified: 200 via `/raw/`, exe sha f6ea1c7d, zip sha
+  6aaec1df, no-store header served. (Error: I first published to a new
+  root-level `/dohping/` which the user never browses — the canonical area
+  is `served/projects/dohping/` per §6; corrected, stray dir removed.)
 
 ### NEXT for v0.1.2 (unchanged from part 1)
 Re-derive `publish/` (one commit behind; CHANGELOG now in PUBLIC_ITEMS), push
@@ -362,14 +365,17 @@ export PATH="$GOROOT/bin:$PATH"        # ORDER MATTERS
 
 - Rig is the ONLY delivery path (bare MEDIA: lines don't reach the laptop in
   remote-gateway mode). Serve root: `/home/hermes/.hermes/user/rig/served/`.
-- `https://files.hermes.home/dohping/` (basic auth: user `hermes`, password in
-  Hermes memory — re-share only if user asks).
+- `https://files.hermes.home/projects/dohping/` (basic auth: user `hermes`,
+  password in Hermes memory — re-share only if user asks). NOTE: the real
+  rig dohping area lives under `served/projects/dohping/` (2026-08-23 reorg),
+  NOT a root-level `served/dohping/`. Old handoff text saying
+  `files.hermes.home/dohping/` was wrong.
 - **VERSIONED FILENAMES (2026-08-18 lesson):** every build also publishes as
   `dohping-<os>-<arch>-<sha8>` plus `INDEX.txt` history. Plain name = latest
   SHIPPED build; Windows renames same-name re-downloads ("(1)") — never rely on
   the plain name alone for a test round; tell the user the versioned name or sha.
-- Publish after rebuild: `cp dist/* <served>/dohping/` then verify
-  `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" https://files.hermes.home/dohping/dohping-linux-amd64` → 200 and sha served-vs-dist.
+- Publish after rebuild: `cp dist/* <served>/projects/dohping/` then verify
+  `curl -sku hermes:<pass> -o /dev/null -w "%{http_code}" https://files.hermes.home/raw/projects/dohping/dohping-linux-amd64` → 200 and sha served-vs-dist.
 - Current shipped linux-amd64: #79-fixed source, dist sha `0ac183e1…` (rig
   carries current builds only; no versioned artifacts since 2026-08-23 reorg).
 - GitHub release assets use PLAIN names; sha prefix is a rig/local convention.
