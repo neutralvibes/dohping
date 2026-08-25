@@ -62,8 +62,12 @@ No em-dashes, human prose.
 - SPA download buttons were saving index.html as .htm for non-media files —
   fixed via `rawUrlFor()` routing non-media through `/raw/`; E2E test asserts
   real bytes via a self-created/self-removed fixture.
-- `Cache-Control: no-store` now on all `files.hermes.home` responses (fixed the
-  stale-listing flake too). Caddy + test Caddyfile both updated.
+- **`Cache-Control: no-store` now on all `files.hermes.home` responses (fixed the
+  stale-listing flake too). Caddy + test Caddyfile both updated.**
+  (2026-08-25 hardening: `Pragma: no-cache` + `Expires: 0` added alongside,
+  and the SPA's `/raw/` fetches now send `cache: 'no-store'` — the browser is
+  told at request time never to reuse a cached listing, so a fresh listing
+  always renders. Fix lives in BOTH layers; see the file-serve-rig skill.)
 - Binaries download via `/raw/` path (plain paths hit the SPA). Documented in
   the `file-serve-rig` skill.
 - Test builds on the rig: `dohping-linux-armv7-03f3ab3e`,
