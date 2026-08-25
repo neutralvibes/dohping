@@ -110,6 +110,25 @@ mv dohping ~/.local/bin/
 
 `~/.local/bin` is on the default PATH on Debian and Raspberry Pi OS. It is added when the shell profile runs, so if the directory did not exist at login you may need to log out and back in (or start a new shell) for it to appear on PATH. On other distributions you may need to add it to `PATH` yourself.
 
+#### Permissions
+
+Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. `dohping` works around this with a fallback chain: raw socket, then an unprivileged ping socket, then the system `ping` command. The system `ping` is the tier that lets a normal user run `dohping` without sudo. Wherever `ping` already works for you, `dohping` works too.
+
+How `ping` gets its privilege differs by distribution:
+
+- **Raspberry Pi OS and many Debian-based systems** give `ping` the setuid bit, so any user can run it. `dohping` detects that and uses it automatically. No configuration needed.
+- **Distributions moving to stricter defaults** (and some that ship `ping` with no special privilege at all) may not let a normal user run `ping` either.
+
+If `dohping` does report a permission error, the modern fix is a single fine-grained privilege granted to the binary:
+
+```sh
+sudo setcap cap_net_raw=+ep /usr/local/bin/dohping
+```
+
+That grants only the one capability the raw socket needs, not full root. After that, any user can run `dohping` directly.
+
+If ICMP is blocked entirely, `--probe tcp` needs no privileges at all.
+
 ### macOS installation
 
 Download the macOS archive for your architecture from the [releases page](https://github.com/neutralvibes/dohping/releases). It is named like `dohping_<version>_darwin_<arch>.tar.gz`, and the binary inside is named `dohping`.
@@ -161,25 +180,6 @@ This is a well-known **false positive** triggered by Windows' machine-learning a
 1. You can verify the source code yourself. It contains no malicious payloads.
 2. If compiling locally, add your build directory to your Windows Defender exclusion list.
 3. If using the pre-compiled binary, you can click "Allow on device" within Windows Security's protection history.
-
-## Permissions
-
-Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. `dohping` works around this with a fallback chain: raw socket, then an unprivileged ping socket, then the system `ping` command. The system `ping` is the tier that lets a normal user run `dohping` without sudo. Wherever `ping` already works for you, `dohping` works too.
-
-How `ping` gets its privilege differs by distribution:
-
-- **Raspberry Pi OS and many Debian-based systems** give `ping` the setuid bit, so any user can run it. `dohping` detects that and uses it automatically. No configuration needed.
-- **Distributions moving to stricter defaults** (and some that ship `ping` with no special privilege at all) may not let a normal user run `ping` either.
-
-If `dohping` does report a permission error, the modern fix is a single fine-grained privilege granted to the binary:
-
-```sh
-sudo setcap cap_net_raw=+ep /usr/local/bin/dohping
-```
-
-That grants only the one capability the raw socket needs, not full root. After that, any user can run `dohping` directly.
-
-If ICMP is blocked entirely, `--probe tcp` needs no privileges at all.
 
 ## When to use it
 
