@@ -15,6 +15,78 @@ flow fully exercised and working. **ICMP tier escalation shipped on master
 
 ---
 
+## SESSION 2026-08-25 (part 2) — Windows ANSI + glyphs accepted; AV false positive; v0.1.2 pending — READ FIRST
+
+### Windows fixes: DONE + ACCEPTED (#87)
+User ran the Windows build on real hardware (cmd.exe, PowerShell, VS Code
+terminal). Two issues found and fixed:
+- **Color showed raw escapes in classic cmd.exe/PowerShell** (VS Code rendered
+  fine). Root-cause fix: enable `ENABLE_VIRTUAL_TERMINAL_PROCESSING` on the
+  console at startup via `internal/console` (`SetConsoleMode` on stdout+stderr)
+  — the user's own approach, which replaced my terminal-detection attempt.
+  Color now renders on all Windows consoles.
+- **Liveness bar (`▁▃▅▇`) invisible in cmd.exe/PowerShell** — the block glyphs
+  (U+2581..U+2587) are not in the classic consoles' codepage fonts. Fix:
+  `output.SetFrames` swaps to an ASCII spinner (`- \ | /`) when
+  `console.SupportsUnicodeGlyphs()` is false (classic consoles); VS Code /
+  Windows Terminal / Unix keep the rising bar.
+- Also added **`-n` as a shortcut for `--no-color`** (count owns `-c`).
+- Verified working by user with real-time protection off: "colors work on both
+  cmd.exe and powershell", "works with the new spinner on cmdline.exe".
+
+### AV false positive (#88) — UNRESOLVED, the open Windows question
+Defender flags the Windows build as `Trojan:Win32/Wacatac.C!ml`. Decisive
+evidence it is a false positive:
+- The **unchanged #79 build** the user ran many times is ALSO flagged now —
+  the bytes did not change, so the scanner's ML model updated, not our code.
+- New build is byte-identical to a clean rebuild (determinism proven).
+- Wacatac.C!ml is a known Defender ML false positive on Go binaries
+  (microsoft/go#1255; golangbridge thread). `!ml` = machine-learning heuristic,
+  not a signature.
+- NOT resolvable in code — any rebuild re-scores, and even old bytes now flag.
+**Robust fix for a public release = Authenticode code-signing** (OV cert, or
+Azure Trusted Signing free tier). Self-signed certs do NOT reliably clear it.
+User's lean: **may skip Windows for now if signing is laborious** — the tool's
+core audience (Pi forums) is Linux/ARM. Windows is a bonus platform.
+
+### README: Linux/macOS/Windows install sections done
+"Linux installation" (extract `tar -xzf`, system-wide `/usr/local/bin` +
+per-user `~/.local/bin`, PATH-on-login note), "macOS installation" (incl.
+Gatekeeper `xattr -dr com.apple.quarantine`), "Windows installation"
+(Expand-Archive, `.\dohping.exe`). "Permissions" section: setcap
+`cap_net_raw=+ep` is the modern route; Pi ships `/usr/bin/ping` setuid (not
+capabilities); "should work with no configuration, distros differ" framing.
+No em-dashes, human prose.
+
+### Rig + SPA side (separate from dohping repo)
+- SPA download buttons were saving index.html as .htm for non-media files —
+  fixed via `rawUrlFor()` routing non-media through `/raw/`; E2E test asserts
+  real bytes via a self-created/self-removed fixture.
+- `Cache-Control: no-store` now on all `files.hermes.home` responses (fixed the
+  stale-listing flake too). Caddy + test Caddyfile both updated.
+- Binaries download via `/raw/` path (plain paths hit the SPA). Documented in
+  the `file-serve-rig` skill.
+- Test builds on the rig: `dohping-linux-armv7-03f3ab3e`,
+  `dohping-linux-armv6-2a5c2fc3`, `dohping-linux-amd64-8e2fdd13` (debug-tagged
+  #85), `dohping-windows-amd64-14338619.exe` (VT+spinner, the verified-good
+  Windows build).
+
+### OPEN DECISION — how to handle Windows for v0.1.2
+1. Code-sign the Windows binary (OV cert / Azure Trusted Signing) — robust but
+   has cost/identity-verification friction.
+2. Skip Windows signing for now, ship Linux/Pi/macOS first — Windows flagged
+   by Defender, documented false positive.
+3. Ship with a documented false-positive note.
+User was leaning toward (2) if signing is laborious. **Do not decide for them;
+the clarify came back empty.**
+
+### NEXT for v0.1.2 (unchanged from part 1)
+Re-derive `publish/` (one commit behind; CHANGELOG now in PUBLIC_ITEMS), push
+branch, PR, tag v0.1.2, CI draft, user publishes. Ruleset switch ("Admin bypass
+→ pull requests only") is a user UI action.
+
+---
+
 ## SESSION 2026-08-25 — ARM privilege escalation (#85) — READ THIS if resuming
 
 **User report:** on an armv7 box (armv6 binary), `ping` worked non-root but
