@@ -98,7 +98,7 @@ mkdir -p ~/.local/bin
 mv dohping ~/.local/bin/
 ```
 
-`~/.local/bin` is on the default PATH on Debian and Raspberry Pi OS. On other distributions you may need to add it to `PATH`.
+`~/.local/bin` is on the default PATH on Debian and Raspberry Pi OS. It is added when the shell profile runs, so if the directory did not exist at login you may need to log out and back in (or start a new shell) for it to appear on PATH. On other distributions you may need to add it to `PATH` yourself.
 
 ### Permissions
 
