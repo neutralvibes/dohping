@@ -71,12 +71,11 @@ No em-dashes, human prose.
   #85), `dohping-windows-amd64-14338619.exe` (VT+spinner, the verified-good
   Windows build).
 
-### Windows decision — RESOLVED (2026-08-25): ship Windows in v0.1.2 with a documented note
+### Windows mitigation — SHIPPED; ship-vs-defer for v0.1.2 still OPEN
 - **Code signing: OFF the table** (user: "code signing is expensive for a free
   tool"). No OV cert, no Azure Trusted Signing. The cost/identity friction
   doesn't pay back for a free tool with a Linux/Pi core audience.
-- **Windows ships in v0.1.2** (defer-Windows lean dropped) with two mitigations
-  (#89, committed):
+- Two mitigations shipped (#89, committed):
   1. **`-s -w` strip on Windows builds only** (release.sh): strips symbol table
      + DWARF debug info. Measured: windows/amd64 5,212,160 → 3,532,800 bytes
      (32% smaller). Byte-deterministic across rebuilds (sha f6ea1c7d…),
@@ -89,6 +88,17 @@ No em-dashes, human prose.
      source, Defender exclusion for local compiles, "Allow on device" in
      Windows Security.
 - CHANGELOG `[Unreleased]` carries both changes.
+- **The v0.1.2 ship-vs-defer call is NOT made** — user flagged that neither
+  the signing remark nor the note constitutes a ship decision. Do not assume;
+  ask when the release is ready. (2026-08-25: an earlier DECISIONS draft
+  stamped it decided; corrected at the user's signal.)
+- **Windows build published to the rig (2026-08-25, user asked):**
+  `https://files.hermes.home/dohping/` — `dohping-windows-amd64-f6ea1c7d.exe`
+  (stripped, the verified #87 build; plain name `dohping-windows-amd64.exe`
+  aliases it), plus `dohping_0.1.1_windows_amd64.zip` and
+  `dohping_0.1.1_windows_arm64.zip` release archives, and an INDEX.txt.
+  Verified: 200 via `/raw/`, exe sha matches f6ea1c7d, zip sha 6aaec1df,
+  no-store header served.
 
 ### NEXT for v0.1.2 (unchanged from part 1)
 Re-derive `publish/` (one commit behind; CHANGELOG now in PUBLIC_ITEMS), push
