@@ -38,6 +38,16 @@ verify.** Gates green (build/vet/tests incl. debug+race/gofmt/golangci-lint/
 staticcheck/gosec). NOT yet released — v0.1.2 flows through the proven pipeline
 once the Pi test confirms.
 
+**ACCEPTED 2026-08-25 on real hardware (#86):** user ran both the armv6 and
+armv7 debug test builds on the Pi, no extra privileges, both work. The exact
+box where `ping` worked but dohping needed sudo now runs dohping without sudo.
+Rig downloads confirmed working (SPA download fix via /raw/). README gained a
+"Running without sudo (Linux / Raspberry Pi)" section (Pi ships /usr/bin/ping
+setuid, not capabilities; setcap is the modern alternative). NEXT: ship v0.1.2
+through the proven pipeline — re-derive publish/ (it is one commit behind, and
+CHANGELOG moved into PUBLIC_ITEMS), push branch, PR, tag v0.1.2, CI draft,
+user publishes. Requires publish-github.sh re-derive first.
+
 ---
 
 ## SESSION 2026-08-25 — the release saga (v0.1.0 → v0.1.1) — READ FIRST
