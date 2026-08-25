@@ -10,7 +10,33 @@ state-change clobber fixed + accepted (#79). README v2 with hero GIF baked in
 (2026-08-24). Plain log format is now CSV (#80). Published-source scrub done
 (#81). **RELEASED: v0.1.1 is the single live release on GitHub** — archives,
 CI-built, all platforms incl. ARM. v0.1.0 was dropped (never posted). Publish
-flow fully exercised and working.**
+flow fully exercised and working. **ICMP tier escalation shipped on master
+(#85, 2026-08-25): dohping now works wherever `ping` works.***
+
+---
+
+## SESSION 2026-08-25 — ARM privilege escalation (#85) — READ THIS if resuming
+
+**User report:** on an armv7 box (armv6 binary), `ping` worked non-root but
+`./dohping` showed a bare `error` with exit 0 — no message, no abort — and
+worked only under `sudo`. A socket tier can OPEN for an unprivileged user yet
+fail every probe with a non-permission error; the old code only fell to system
+ping when both socket OPENS failed, so tier 3 never ran and the app neither
+escalated nor explained.
+
+**Fix (committed to master, #85):** `NewICMPProbe` now returns a `fallbackProbe`
+chain that keeps the system-ping tier even when a socket opened. On the FIRST
+probe error from a tier that has never produced a clean up/down, it escalates
+and retries in the same probe call. A tier that has produced up/down is trusted
+thereafter (transient errors surface, never downgrade a working tier to spawning
+ping every interval); escalation is sticky. Decision 51's abort preserved — now
+fires only when EVERY tier is denied. Hint improved (sudo / `sudo setcap
+cap_net_raw=+ep <path>` / `--probe tcp`); probe errors logged to DOHPING_DEBUG.
+
+**Status: test build (debug-tagged) published to the rig for the Pi user to
+verify.** Gates green (build/vet/tests incl. debug+race/gofmt/golangci-lint/
+staticcheck/gosec). NOT yet released — v0.1.2 flows through the proven pipeline
+once the Pi test confirms.
 
 ---
 

@@ -110,7 +110,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "dohping: %v\n", err)
 		if ping.IsPermissionError(err) {
-			_, _ = fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary)")
+			_, _ = fmt.Fprintln(stderr, permissionHint())
 		}
 		return ExitProbeInit
 	}
@@ -221,6 +221,12 @@ loop:
 			if logger != nil {
 				logEvent(logger, ev)
 			}
+			// Record every probe error in the debug log: the exact
+			// failure reason on the user's box is the evidence for any
+			// tier-escalation report (debug build only).
+			if (ev.Kind == state.EventError || ev.Kind == state.EventProbeError) && ev.Err != nil {
+				debugx.Debugf("probe", "probe error: %v", ev.Err)
+			}
 			// A permission-class operational error (raw socket, ping
 			// socket, or ping command denied) is permanent — abort with
 			// guidance instead of probing in error state forever.
@@ -277,7 +283,7 @@ loop:
 		// Permission problem: report with guidance, exit 3 — never a
 		// host-down condition, never an endless error state.
 		_, _ = fmt.Fprintf(stderr, "dohping: %v\n", permErr)
-		_, _ = fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary); on some systems the ping command itself needs privileges")
+		_, _ = fmt.Fprintln(stderr, permissionHint())
 		return ExitProbeInit
 	}
 	if !opts.Quiet && tty.Stdout {
@@ -418,4 +424,11 @@ func buildProbe(opts *cli.Options) (ping.Probe, error) {
 	default:
 		return ping.NewICMPProbe(opts.Host, opts.Timeout)
 	}
+}
+
+// permissionHint is the guidance printed whenever every probe path is
+// denied. The TCP probe is the no-privileges answer, so it is named
+// first-class alongside elevation and the capability grant.
+func permissionHint() string {
+	return "hint: run with elevated privileges, grant CAP_NET_RAW (sudo setcap cap_net_raw=+ep <path-to-dohping>), or use --probe tcp which needs no privileges"
 }
