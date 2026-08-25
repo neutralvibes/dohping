@@ -169,7 +169,7 @@ Or right-click the zip and choose Extract All. The binary runs directly from the
 
 To run `dohping` from any folder, add the extracted directory to your PATH.
 
-### ⚠️ Note on Windows Defender (Wacatac.C!ml False Positive)
+#### ⚠️ Note on Windows Defender (Wacatac.C!ml False Positive)
 
 When downloading or compiling this utility on Windows, Windows Defender may flag the executable as `Trojan:Win32/Wacatac.C!ml`.
 
