@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
-# Build reproducible dohping release binaries for all supported targets.
+# Build reproducible dohping release packages for all supported targets.
 #
 # Reproducible: -trimpath + no VCS stamping; the same source + Go version
 # yields byte-identical binaries. Version is injected via ldflags.
+#
+# Packaging: each target ships as a compressed archive named
+#   dohping_<version>_<os>_<arch>.tar.gz    (unix: gzip, exec bit set)
+#   dohping_<version>_<os>_<arch>.zip       (windows: plain dohping.exe)
+# with the PLAIN binary name inside (no os/arch suffix, no version) so a
+# download extracts to a ready-to-run `dohping` / `dohping.exe`. A
+# SHA256SUMS over the archives accompanies them.
 #
 # Usage: ./scripts/release.sh [output-dir]   (default: dist/)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="${1:-dist}"
+# Resolve OUT to an absolute path WITHOUT requiring it to exist (packaging
+# runs from a staging dir, and a clean checkout has no dist/ yet). The
+# default resolves against the current working directory.
+case "${1:-dist}" in
+  /*) OUT="${1:-dist}" ;;
+  *)  OUT="$PWD/${1:-dist}" ;;
+esac
 
 # The quality gate runs first — a red gate refuses to build a release.
 # (gofmt, vet, race tests, gosec + the other analyzers when installed.)
@@ -24,8 +37,10 @@ fi
 VERSION="${DOHPING_VERSION:-$(grep -m1 'Version = ' "$ROOT/internal/version/version.go" | sed -E 's/.*"([^"]+)".*/\1/')}"
 GOROOT_BIN="${GOROOT:-$(go env GOROOT)}/bin"
 
+rm -rf "$OUT"
 mkdir -p "$OUT"
-rm -f "$OUT"/dohping-* "$OUT/SHA256SUMS"
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
 
 targets=(
   "linux amd64"
@@ -38,17 +53,29 @@ targets=(
 for target in "${targets[@]}"; do
   set -- $target
   os="$1"; arch="$2"
-  ext=""
-  if [ "$os" = "windows" ]; then ext=".exe"; fi
-  outfile="$OUT/dohping-${os}-${arch}${ext}"
-  echo "building $os/$arch -> $outfile"
+  bin="dohping"
+  if [ "$os" = "windows" ]; then bin="dohping.exe"; fi
+
+  echo "building $os/$arch"
   GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
     "$GOROOT_BIN/go" build -trimpath -buildvcs=false \
     -ldflags "-X dohping/internal/version.Version=$VERSION" \
-    -o "$outfile" "$ROOT/cmd/dohping"
+    -o "$STAGE/$bin" "$ROOT/cmd/dohping"
+
+  base="dohping_${VERSION}_${os}_${arch}"
+  if [ "$os" = "windows" ]; then
+    # Zip with the system `zip` (present on the CI runner and dev boxes).
+    (cd "$STAGE" && zip -q "$OUT/$base.zip" "$bin")
+    echo "packaged $OUT/$base.zip"
+  else
+    # The archive must preserve the executable bit so a download extracts
+    # to a runnable binary without a manual chmod.
+    (cd "$STAGE" && tar czf "$OUT/$base.tar.gz" "$bin")
+    echo "packaged $OUT/$base.tar.gz"
+  fi
 done
 
-(cd "$OUT" && sha256sum dohping-* > SHA256SUMS)
+(cd "$OUT" && sha256sum dohping_* > SHA256SUMS)
 echo "checksums:"
 cat "$OUT/SHA256SUMS"
 echo "release ready in $OUT (version $VERSION)"
