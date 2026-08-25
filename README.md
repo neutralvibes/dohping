@@ -61,6 +61,98 @@ Press `q` to quit cleanly. `Ctrl-C` works too.
 - **Scriptable**: predictable exit codes, optional JSON logging, and `--quiet` for clean output.
 - **Cross-platform**: Linux, macOS, Windows (amd64 and arm64).
 
+## When to use it
+
+- **"When is a host `up` or `down`?"**: run and watch the status change.
+- **"Is the wifi flaky right now?"**: leave it running and glance at the duration column.
+- **"Did that server just go down?"**: the exact timestamp and failure count are right there.
+- **"Is latency getting worse?"**: watch the `AVG` column drift in real time.
+- **"Script a health check"**: predictable exit codes, JSON logging, no TTY assumptions.
+
+## Usage
+
+```text
+Usage:
+  dohping [options] HOST
+
+Options:
+  -h, --help                 Show help and exit
+  -V, --version              Show version and exit
+  -i, --interval TIME        Probe interval (default 1s)
+  -t, --timeout TIME         Probe timeout (default 2s)
+  -c, --count N              Stop after N probes
+  -p, --probe TYPE           Probe type: icmp | tcp[:PORT] (default icmp)
+  -d, --down-after N         Failures before marking down (default 1)
+  -u, --up-after N           Successes before marking up (default 1)
+
+Display:
+  -q, --quiet                Suppress display output
+      --no-header            Skip the column header
+  -n, --no-color             Disable color output
+      --color MODE           Color mode: auto, always, never
+      --live MODE            Live updates: auto, on, off
+      --no-live              Disable live updating
+  -w, --window               Fixed dashboard window
+      --no-window            Disable window mode
+      --window-lines N       Window height (default 10; implies --window)
+      --timestamp-format F   Display timestamp format: HH:MM:SS | rfc3339
+
+Logging:
+  -l, --log-file PATH        Append status events to a file
+      --log-format FORMAT    Log format: csv | json (default csv)
+
+Exit codes:
+  0    Normal completion
+  1    General error
+  2    Usage or configuration error
+  3    Probe initialization or permission error
+  130  Interrupted (SIGINT / Ctrl-C)
+  143  Terminated (SIGTERM)
+```
+
+## Examples
+
+### Watch a host until you stop it
+
+```sh
+dohping 192.168.1.23
+```
+
+ICMP probe every second, plain line mode. The live line updates in place.
+
+### Scripted check
+
+```sh
+dohping -c 5 example.com; echo "exit: $?"
+```
+
+Runs 5 probes, prints finalized lines and a summary, exits `0`.
+
+### TCP probe without root
+
+```sh
+dohping --probe tcp example.com        # port 443
+dohping --probe tcp:22 example.com     # explicit port
+```
+
+Connection established or refused means **up**; timeout means **down**; DNS failure means **error** (exit 3, never a false "down").
+
+### Dashboard window
+
+```sh
+dohping --window-lines 8 example.com
+```
+
+A fixed, auto-scrolling dashboard drawn in place. Resize it while it runs and it repaints cleanly.
+
+### Quiet logging
+
+```sh
+dohping -q -l events.log -i 5 example.com
+```
+
+No display, but every status change is appended to `events.log` (text or JSON), fsync'd, with `0600` permissions.
+
 ## Installation
 
 ### Release binaries
@@ -180,98 +272,6 @@ This is a well-known **false positive** triggered by Windows' machine-learning a
 1. You can verify the source code yourself. It contains no malicious payloads.
 2. If compiling locally, add your build directory to your Windows Defender exclusion list.
 3. If using the pre-compiled binary, you can click "Allow on device" within Windows Security's protection history.
-
-## When to use it
-
-- **"When is a host `up` or `down`?"**: run and watch the status change.
-- **"Is the wifi flaky right now?"**: leave it running and glance at the duration column.
-- **"Did that server just go down?"**: the exact timestamp and failure count are right there.
-- **"Is latency getting worse?"**: watch the `AVG` column drift in real time.
-- **"Script a health check"**: predictable exit codes, JSON logging, no TTY assumptions.
-
-## Usage
-
-```text
-Usage:
-  dohping [options] HOST
-
-Options:
-  -h, --help                 Show help and exit
-  -V, --version              Show version and exit
-  -i, --interval TIME        Probe interval (default 1s)
-  -t, --timeout TIME         Probe timeout (default 2s)
-  -c, --count N              Stop after N probes
-  -p, --probe TYPE           Probe type: icmp | tcp[:PORT] (default icmp)
-  -d, --down-after N         Failures before marking down (default 1)
-  -u, --up-after N           Successes before marking up (default 1)
-
-Display:
-  -q, --quiet                Suppress display output
-      --no-header            Skip the column header
-  -n, --no-color             Disable color output
-      --color MODE           Color mode: auto, always, never
-      --live MODE            Live updates: auto, on, off
-      --no-live              Disable live updating
-  -w, --window               Fixed dashboard window
-      --no-window            Disable window mode
-      --window-lines N       Window height (default 10; implies --window)
-      --timestamp-format F   Display timestamp format: HH:MM:SS | rfc3339
-
-Logging:
-  -l, --log-file PATH        Append status events to a file
-      --log-format FORMAT    Log format: csv | json (default csv)
-
-Exit codes:
-  0    Normal completion
-  1    General error
-  2    Usage or configuration error
-  3    Probe initialization or permission error
-  130  Interrupted (SIGINT / Ctrl-C)
-  143  Terminated (SIGTERM)
-```
-
-## Examples
-
-### Watch a host until you stop it
-
-```sh
-dohping 192.168.1.23
-```
-
-ICMP probe every second, plain line mode. The live line updates in place.
-
-### Scripted check
-
-```sh
-dohping -c 5 example.com; echo "exit: $?"
-```
-
-Runs 5 probes, prints finalized lines and a summary, exits `0`.
-
-### TCP probe without root
-
-```sh
-dohping --probe tcp example.com        # port 443
-dohping --probe tcp:22 example.com     # explicit port
-```
-
-Connection established or refused means **up**; timeout means **down**; DNS failure means **error** (exit 3, never a false "down").
-
-### Dashboard window
-
-```sh
-dohping --window-lines 8 example.com
-```
-
-A fixed, auto-scrolling dashboard drawn in place. Resize it while it runs and it repaints cleanly.
-
-### Quiet logging
-
-```sh
-dohping -q -l events.log -i 5 example.com
-```
-
-No display, but every status change is appended to `events.log` (text or JSON), fsync'd, with `0600` permissions.
 
 ## Display modes
 
