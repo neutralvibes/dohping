@@ -112,7 +112,7 @@ mv dohping ~/.local/bin/
 
 ### Permissions
 
-Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. On most distributions this is handled by giving `ping` itself the privilege, so your user account can already run `ping` without sudo. `dohping` detects that and falls back to the system `ping` command, so on a typical Linux or Raspberry Pi OS setup it should work with no configuration at all. Distros differ on how `ping` gets its privileges, and several are moving to stricter defaults, so this depends on the distribution.
+Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. On some distributions this is handled by giving `ping` itself the privilege, so your user account may already run `ping` without sudo. `dohping` detects that and falls back to the system `ping` command, so on a typical Linux or Raspberry Pi OS setup it should work with no configuration at all. Distros differ on how `ping` gets its privileges, and several are moving to stricter defaults, so this depends on the distribution.
 
 If `dohping` does report a permission error, the modern fix is a single fine-grained privilege granted to the binary:
 
