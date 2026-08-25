@@ -8,42 +8,59 @@ Read order: this file first, then `SPECIFICATION.md` (the contract),
 **Status: build complete. All 6 phases green. Resize resolved (#78 shipped),
 state-change clobber fixed + accepted (#79). README v2 with hero GIF baked in
 (2026-08-24). Plain log format is now CSV (#80). Published-source scrub done
-(#81). Publish gate: re-derive publish/, push branch, PR — still user-approved
-+ parked.**
+(#81). **RELEASED: v0.1.1 is the single live release on GitHub** — archives,
+CI-built, all platforms incl. ARM. v0.1.0 was dropped (never posted). Publish
+flow fully exercised and working.**
 
 ---
 
-## SESSION 2026-08-24 (later) — CSV log format + published-source scrub
+## SESSION 2026-08-25 — the release saga (v0.1.0 → v0.1.1) — READ FIRST
 
-Two changes landed after the README-v2 session:
+The publish went from "parked at push" to **v0.1.1 live on GitHub**, through
+a messy but instructive sequence. The full lessons live in the skill
+`github-release-artifacts` (created 2026-08-25); this is the state summary.
 
-1. **Plain log format is CSV** (DECISIONS #80): `--log-format csv|json`
-   (default `csv`, the `text` value is REPLACED). Columns
-   `timestamp,address,state,duration_seconds,min_ms,max_ms,avg_ms,fails` —
-   address before state, duration in raw seconds, unavailable fields as
-   empty cells. JSON unchanged. Spec §14.3/§14.4, README, help, CLI
-   validation, `logx` renderer + tests, and the app signal tests updated.
-   Verified end-to-end: `2026-08-24T18:27:38+01:00,127.0.0.1,up,1,0.22,0.36,0.29,0`.
-   Commit `a1f4fc3`.
+### Final state (verified live)
+- **Release: v0.1.1** — https://github.com/neutralvibes/dohping/releases/tag/v0.1.1
+  published 2026-08-25, NOT a draft. **v0.1.0 release + tag deleted** (never
+  posted anywhere, so nothing was lost).
+- **Tag `v0.1.1`** → `9f48e5f` (current main). Annotated.
+- **8 archives + SHA256SUMS**, CI-built from the tagged tree, gate green:
+  linux amd64 / armv6 / armv7 / arm64, darwin amd64 / arm64,
+  windows amd64 / arm64. Every archive carries README + CHANGELOG + LICENSE
+  with the binary.
+- `main` history: PR #1 (initial) → #2 (CI release workflow) → #3 (archives)
+  → #4 (v0.1.1 ARM + docs) → #5 (armv6) → #6 (armv7 rename).
 
-2. **Published-source scrub** (DECISIONS #81): removed all references to
-   unpublished docs from public source — DECISIONS #N, SPEC-window, and
-   `spec §N` citations, 134 refs across 15 files — rewritten as
-   self-contained prose. The internal SPECIFICATION.md is FORBIDDEN from
-   publish/ (it's in publish-github.sh's FORBIDDEN list), so `spec §N`
-   refs were dangling too. Zero behavioral change. Commit `76deeb4`.
-   Lesson: the earlier "scrub intact" claim only covered prose, not Go
-   comments — verify with `grep -rniE 'decisions|spec-window|specification|spec §' internal/ cmd/ README.md docs/`
-   before any publish.
+### The release pipeline (now proven, follow it for v0.1.2+)
+1. Changes travel as PRs → user merges (agent never merges/pushes main).
+2. **Tag = the trigger**: `git tag -a vX.Y.Z -m msg <main>` then
+   `git push origin vX.Y.Z`. CI runs the full gate, then the release job
+   builds `dist/*` via `scripts/release.sh` and attaches to the release
+   as a **DRAFT**.
+3. User reviews + publishes the draft. Agent never publishes.
+4. To redo: delete draft release + tag (local AND remote), re-tag on new
+   main, push. Never leave a stale tag pointing at old code.
 
-Both gates green (gofmt, vet, race, golangci-lint, staticcheck, gosec,
-govulncheck). Working tree clean on `master`.
+### What `scripts/release.sh` now produces
+`dohping_<ver>_<os>_<arch>.tar.gz` (unix) / `.zip` (windows), plain binary
+name inside + exec bit, plus README/CHANGELOG/LICENSE. Target matrix is a
+`os goarch assetname goarm` table — `linux arm armv7 7` and
+`linux arm armv6 6` are the two 32-bit ARM builds. **Test from a CLEAN
+tree**: `rm -rf dist && bash scripts/release.sh` (CI has no dist/ — the
+original script died with `cd: dist: No such file or directory`).
+`go tool dist list` is ground truth for what Go can build (darwin/windows
+have NO 32-bit arm).
 
-**NEXT (parked, user-approved):** re-derive `publish/` (now includes the CSV
-change + the scrub), push `publish-initial`, open PR, WATCH CI TO GREEN, tag
-v0.1.0 + release with plain-named assets + SHA256SUMS. Before pushing,
-consult `build-docs/PUBLISH-CHECKLIST.md` (identity, wording, tags) and
-re-verify the scrub grep. LICENSE holder line still `<YOUR NAME HERE>`.
+### Open follow-ups (not done)
+- `publish/` needs a re-derive to pick up `f5917c3` (armv7 rename) if the
+  public tree is touched again. Currently `publish/` is one commit behind
+  private master.
+- `CHANGELOG.md` is now in `PUBLIC_ITEMS` (publish-github.sh) — that fix is
+  in private master but the re-derived public tree hasn't shipped since.
+- The rig (`served/dohping/`) still carries pre-release builds; not updated
+  for v0.1.1 — user hasn't asked. VERSIONED filenames + INDEX.txt convention
+  applies if we do.
 
 ---
 
