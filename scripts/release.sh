@@ -54,32 +54,39 @@ for doc in README.md CHANGELOG.md LICENSE; do
   cp "$ROOT/$doc" "$STAGE/$doc"
 done
 
-# GOOS/GOARCH pairs Go actually supports (verified with `go tool dist
-# list`): darwin has no 32-bit arm, windows has no 32-bit arm. So ARM
-# coverage = linux arm (armv7) + arm64 on linux, darwin, windows.
+# GOOS/GOARCH/GOARM triples Go actually supports (verified with `go tool
+# dist list`): darwin has no 32-bit arm, windows has no 32-bit arm. ARM
+# coverage = linux armv7 (GOARM=7, the default) + linux armv6 (GOARM=6, for
+# original Pi 1 / Pi Zero) + arm64 on linux, darwin, windows.
+# The asset name distinguishes the two 32-bit ARM variants: "arm" is the
+# armv7 default, "armv6" the legacy build (same GOARCH=arm, different GOARM).
 targets=(
-  "linux amd64"
-  "linux arm64"
-  "linux arm"
-  "darwin amd64"
-  "darwin arm64"
-  "windows amd64"
-  "windows arm64"
+  "linux   amd64 amd64   "
+  "linux   arm64 arm64   "
+  "linux   arm   arm     7"
+  "linux   arm   armv6   6"
+  "darwin  amd64 amd64   "
+  "darwin  arm64 arm64   "
+  "windows amd64 amd64   "
+  "windows arm64 arm64   "
 )
 
 for target in "${targets[@]}"; do
   set -- $target
-  os="$1"; arch="$2"
+  os="$1"; goarch="$2"; assetarch="$3"; goarm="${4:-}"
   bin="dohping"
   if [ "$os" = "windows" ]; then bin="dohping.exe"; fi
 
-  echo "building $os/$arch"
-  GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
-    "$GOROOT_BIN/go" build -trimpath -buildvcs=false \
+  echo "building $os/$goarch (GOARM=${goarm:-default})"
+  envs=("GOOS=$os" "GOARCH=$goarch" "CGO_ENABLED=0")
+  if [ -n "$goarm" ]; then
+    envs+=("GOARM=$goarm")
+  fi
+  env "${envs[@]}" "$GOROOT_BIN/go" build -trimpath -buildvcs=false \
     -ldflags "-X dohping/internal/version.Version=$VERSION" \
     -o "$STAGE/$bin" "$ROOT/cmd/dohping"
 
-  base="dohping_${VERSION}_${os}_${arch}"
+  base="dohping_${VERSION}_${os}_${assetarch}"
   # Package the binary plus the docs (README.md, CHANGELOG.md, LICENSE),
   # all present in $STAGE. The binary keeps its exec bit in the tar.
   if [ "$os" = "windows" ]; then
