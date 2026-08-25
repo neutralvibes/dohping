@@ -2,7 +2,7 @@
 
 > *"Doh!"* Homer Simpson, every time `ping` scrolls him into oblivion.
 
-**dohping** is a status-line based ping for network monitoring. It tells you if a host is up, for how long, and how fast, as one clean, live-updating line. When it flips to **down**, you see exactly when and for how long. No root required in some modes.
+**dohping** is a status-line based ping for network monitoring. It tells you if a host is up, for how long, and how fast, as one clean, live-updating line. When it flips to **down**, you see exactly when and for how long. No root needed for TCP probes; ICMP falls back to the system `ping` when unprivileged sockets are blocked.
 
 ![dohping watching a flapping host](assets/dohping-demo.gif)
 
@@ -150,19 +150,19 @@ Or right-click the zip and choose Extract All. The binary runs directly from the
 
 To run `dohping` from any folder, add the extracted directory to your PATH.
 
-## ⚠️ Note on Windows Defender (Wacatac.C!ml False Positive)
+### ⚠️ Note on Windows Defender (Wacatac.C!ml False Positive)
 
 When downloading or compiling this utility on Windows, Windows Defender may flag the executable as `Trojan:Win32/Wacatac.C!ml`.
 
 This is a well-known **false positive** triggered by Windows' machine-learning algorithm. Because Go binaries are statically compiled and this tool interacts directly with Windows console API flags (to enable terminal colors), the antivirus erroneously guesses it is a threat due to its lack of a global digital signature.
 
-### How to resolve:
+#### How to resolve:
 
 1. You can verify the source code yourself. It contains no malicious payloads.
 2. If compiling locally, add your build directory to your Windows Defender exclusion list.
 3. If using the pre-compiled binary, you can click "Allow on device" within Windows Security's protection history.
 
-### Permissions
+## Permissions
 
 Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. On some distributions this is handled by giving `ping` itself the privilege, so your user account may already run `ping` without sudo. `dohping` detects that and falls back to the system `ping` command, so on a typical Linux or Raspberry Pi OS setup it should work with no configuration at all. Distros differ on how `ping` gets its privileges, and several are moving to stricter defaults, so this depends on the distribution.
 
@@ -203,7 +203,7 @@ Options:
 Display:
   -q, --quiet                Suppress display output
       --no-header            Skip the column header
-      --no-color             Disable color output
+  -n, --no-color             Disable color output
       --color MODE           Color mode: auto, always, never
       --live MODE            Live updates: auto, on, off
       --no-live              Disable live updating
