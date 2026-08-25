@@ -72,13 +72,16 @@ No em-dashes, human prose.
   Windows build).
 
 ### OPEN DECISION — how to handle Windows for v0.1.2
-1. Code-sign the Windows binary (OV cert / Azure Trusted Signing) — robust but
-   has cost/identity-verification friction.
-2. Skip Windows signing for now, ship Linux/Pi/macOS first — Windows flagged
-   by Defender, documented false positive.
-3. Ship with a documented false-positive note.
-User was leaning toward (2) if signing is laborious. **Do not decide for them;
-the clarify came back empty.**
+**RESOLVED (2026-08-25): code signing is OFF the table.** User: "code signing
+is expensive for a free tool." No OV cert, no Azure Trusted Signing. (Cost /
+identity-verification friction doesn't pay back for a free tool with a
+Linux/Pi core audience.) Remaining fork — still open, clarify came back empty
+a second time:
+1. Defer Windows: v0.1.2 ships Linux/Pi/macOS only; the verified Windows build
+   (#87) stays on the rig. User's earlier lean.
+2. Ship Windows with a documented Defender false-positive note (README Windows
+   section + release notes) — keeps README's Windows install section live.
+Do not pick for them; default to (1) if pushed.
 
 ### NEXT for v0.1.2 (unchanged from part 1)
 Re-derive `publish/` (one commit behind; CHANGELOG now in PUBLIC_ITEMS), push
