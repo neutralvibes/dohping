@@ -58,12 +58,13 @@ done
 # dist list`): darwin has no 32-bit arm, windows has no 32-bit arm. ARM
 # coverage = linux armv7 (GOARM=7, the default) + linux armv6 (GOARM=6, for
 # original Pi 1 / Pi Zero) + arm64 on linux, darwin, windows.
-# The asset name distinguishes the two 32-bit ARM variants: "arm" is the
-# armv7 default, "armv6" the legacy build (same GOARCH=arm, different GOARM).
+# The asset name distinguishes the two 32-bit ARM variants: "armv7" is the
+# default (GOARM=7), "armv6" the legacy build (same GOARCH=arm, different
+# GOARM) — both names self-describe on the release page.
 targets=(
   "linux   amd64 amd64   "
   "linux   arm64 arm64   "
-  "linux   arm   arm     7"
+  "linux   arm   armv7   7"
   "linux   arm   armv6   6"
   "darwin  amd64 amd64   "
   "darwin  arm64 arm64   "
