@@ -119,7 +119,7 @@ How `ping` gets its privilege differs by distribution:
 - **Raspberry Pi OS and many Debian-based systems** give `ping` the setuid bit, so any user can run it. `dohping` detects that and uses it automatically. No configuration needed.
 - **Distributions moving to stricter defaults** (and some that ship `ping` with no special privilege at all) may not let a normal user run `ping` either.
 
-If `dohping` does report a permission error, the modern fix is a single fine-grained privilege granted to the binary:
+If `dohping` does report a permission error and you want to run it without `sudo`, the modern fix is a single fine-grained privilege granted to the binary:
 
 ```sh
 sudo setcap cap_net_raw=+ep /usr/local/bin/dohping
