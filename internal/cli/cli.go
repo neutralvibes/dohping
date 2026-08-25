@@ -181,6 +181,7 @@ func Parse(args []string) (*Options, Action, error) {
 	fs.BoolVar(&opts.Quiet, "quiet", false, "")
 	fs.BoolVar(&opts.NoHeader, "no-header", false, "")
 	fs.BoolVar(&opts.NoColor, "no-color", false, "")
+	fs.BoolVar(&opts.NoColor, "n", false, "") // shortcut: -n for no color
 	fs.StringVar(&opts.ColorMode, "color", opts.ColorMode, "")
 	fs.StringVar(&opts.LiveMode, "live", opts.LiveMode, "")
 	fs.BoolVar(&opts.NoLive, "no-live", false, "")
@@ -226,7 +227,7 @@ func Parse(args []string) (*Options, Action, error) {
 			opts.windowLinesSet = true
 		case "window", "w":
 			opts.windowSet = true
-		case "no-color":
+		case "no-color", "n":
 			opts.noColorSet = true
 		case "color":
 			opts.colorSet = true

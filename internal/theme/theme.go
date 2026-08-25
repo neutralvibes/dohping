@@ -67,17 +67,14 @@ type Config struct {
 type Env struct {
 	NO_COLOR string
 	TERM     string
-	// WT_SESSION is set by Windows Terminal and TERM_PROGRAM by VS Code
-	// and iTerm2. On Windows they identify terminals that process ANSI
-	// escape codes; classic cmd.exe and PowerShell set neither.
-	WT_SESSION   string
-	TERM_PROGRAM string
 }
 
 // Enabled decides whether color output is active. Disabled
 // when any of: --no-color / --color=never, NO_COLOR set non-empty,
-// stdout not a terminal, TERM=dumb, or (on Windows) none of the
-// ANSI-processing terminals is present. NO_COLOR overrides --color=always.
+// stdout not a terminal, TERM=dumb. NO_COLOR overrides --color=always.
+// On Windows, ANSI processing is enabled at startup (console_windows.go),
+// so the classic consoles render color too; no platform-specific
+// detection is needed here.
 func Enabled(cfg Config, isTTY bool, env Env) bool {
 	if cfg.NoColor || cfg.ColorMode == "never" {
 		return false
@@ -89,13 +86,6 @@ func Enabled(cfg Config, isTTY bool, env Env) bool {
 		return false
 	}
 	if env.TERM == "dumb" {
-		return false
-	}
-	if env.TERM == "" && env.WT_SESSION == "" && env.TERM_PROGRAM == "" {
-		// A terminal with no TERM and no ANSI-capable emulator marker.
-		// On Unix real terminals always set TERM, so an empty TERM is a
-		// classic Windows console (cmd.exe, PowerShell), which does not
-		// process ANSI escape codes.
 		return false
 	}
 	return true

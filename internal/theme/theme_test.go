@@ -35,14 +35,6 @@ func TestEnabledRules(t *testing.T) {
 		{"NO_COLOR overrides always", always, true, noColorEnv, false},
 		{"NO_COLOR empty ok", auto, true, Env{NO_COLOR: "", TERM: "xterm"}, true},
 		{"NO_COLOR whitespace counts", always, true, Env{NO_COLOR: " ", TERM: "xterm"}, false},
-		// Classic Windows consoles (cmd.exe, PowerShell) set no TERM and
-		// no ANSI-capable emulator marker: color must stay off.
-		{"win cmd empty TERM", auto, true, Env{NO_COLOR: "", TERM: ""}, false},
-		{"win powershell empty TERM", auto, true, Env{NO_COLOR: "", TERM: ""}, false},
-		// ANSI-aware terminals on Windows set a marker: color on.
-		{"win terminal WT_SESSION", auto, true, Env{NO_COLOR: "", TERM: "", WT_SESSION: "abc"}, true},
-		{"vscode TERM_PROGRAM", auto, true, Env{NO_COLOR: "", TERM: "", TERM_PROGRAM: "vscode"}, true},
-		{"win terminal TERM xterm", auto, true, Env{NO_COLOR: "", TERM: "xterm-256color"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
