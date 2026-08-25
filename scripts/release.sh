@@ -15,7 +15,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="$(cd "${1:-dist}" && pwd)"  # absolute — packaging runs from a staging dir
+# Resolve OUT to an absolute path WITHOUT requiring it to exist (packaging
+# runs from a staging dir, and a clean checkout has no dist/ yet). The
+# default resolves against the current working directory.
+case "${1:-dist}" in
+  /*) OUT="${1:-dist}" ;;
+  *)  OUT="$PWD/${1:-dist}" ;;
+esac
 
 # The quality gate runs first — a red gate refuses to build a release.
 # (gofmt, vet, race tests, gosec + the other analyzers when installed.)
