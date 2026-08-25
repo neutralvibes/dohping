@@ -52,7 +52,7 @@ dohping --window example.com
 
 Press `q` to quit cleanly. `Ctrl-C` works too.
 
-Need help getting it on your machine? See [Installation](#installation).
+Eager to try it? Head to [Installation](#installation) to get it on your machine.
 
 ## What makes it different
 
