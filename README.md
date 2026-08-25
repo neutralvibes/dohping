@@ -52,6 +52,8 @@ dohping --window example.com
 
 Press `q` to quit cleanly. `Ctrl-C` works too.
 
+Need help getting it on your machine? See [Installation](#installation).
+
 ## What makes it different
 
 - **Stateful, not noisy**: one line per status, period. Read your scrollback like a log, not a haystack.
