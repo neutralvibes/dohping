@@ -164,7 +164,12 @@ This is a well-known **false positive** triggered by Windows' machine-learning a
 
 ## Permissions
 
-Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. On some distributions this is handled by giving `ping` itself the privilege, so your user account may already run `ping` without sudo. `dohping` detects that and falls back to the system `ping` command, so on a typical Linux or Raspberry Pi OS setup it should work with no configuration at all. Distros differ on how `ping` gets its privileges, and several are moving to stricter defaults, so this depends on the distribution.
+Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. `dohping` works around this with a fallback chain: raw socket, then an unprivileged ping socket, then the system `ping` command. The system `ping` is the tier that lets a normal user run `dohping` without sudo. Wherever `ping` already works for you, `dohping` works too.
+
+How `ping` gets its privilege differs by distribution:
+
+- **Raspberry Pi OS and many Debian-based systems** give `ping` the setuid bit, so any user can run it. `dohping` detects that and uses it automatically. No configuration needed.
+- **Distributions moving to stricter defaults** (and some that ship `ping` with no special privilege at all) may not let a normal user run `ping` either.
 
 If `dohping` does report a permission error, the modern fix is a single fine-grained privilege granted to the binary:
 
@@ -172,9 +177,9 @@ If `dohping` does report a permission error, the modern fix is a single fine-gra
 sudo setcap cap_net_raw=+ep /usr/local/bin/dohping
 ```
 
-After that, any user can run `dohping` safely. Capabilities are supported on all current Linux and Raspberry Pi OS releases (note that Raspberry Pi OS ships its `ping` with the older setuid bit set rather than a capability, which is why plain `ping` already works there).
+That grants only the one capability the raw socket needs, not full root. After that, any user can run `dohping` directly.
 
-If ICMP is blocked entirely, `--probe tcp` needs no privileges.
+If ICMP is blocked entirely, `--probe tcp` needs no privileges at all.
 
 ## When to use it
 
