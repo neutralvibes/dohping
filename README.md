@@ -110,6 +110,46 @@ mv dohping ~/.local/bin/
 
 `~/.local/bin` is on the default PATH on Debian and Raspberry Pi OS. It is added when the shell profile runs, so if the directory did not exist at login you may need to log out and back in (or start a new shell) for it to appear on PATH. On other distributions you may need to add it to `PATH` yourself.
 
+### macOS installation
+
+Download the macOS archive for your architecture from the [releases page](https://github.com/neutralvibes/dohping/releases). It is named like `dohping_<version>_darwin_<arch>.tar.gz`, and the binary inside is named `dohping`.
+
+Extract the archive:
+
+```sh
+tar -xzf dohping_*.tar.gz
+```
+
+Install it to a directory on your PATH, for example `/usr/local/bin`:
+
+```sh
+sudo mv dohping /usr/local/bin/
+```
+
+macOS may block the first run of a downloaded, unsigned binary. If you see "cannot be opened because it was developed by an unidentified developer", right-click the file and choose Open, or remove the quarantine attribute:
+
+```sh
+xattr -dr com.apple.quarantine dohping
+```
+
+### Windows installation
+
+Download the Windows archive for your architecture from the [releases page](https://github.com/neutralvibes/dohping/releases). It is named like `dohping_<version>_windows_<arch>.zip`, and the binary inside is named `dohping.exe`.
+
+Extract the archive. From PowerShell:
+
+```powershell
+Expand-Archive dohping_*.zip
+```
+
+Or right-click the zip and choose Extract All. The binary runs directly from the extracted folder:
+
+```powershell
+.\dohping.exe 192.168.1.182
+```
+
+To run `dohping` from any folder, add the extracted directory to your PATH.
+
 ### Permissions
 
 Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. On some distributions this is handled by giving `ping` itself the privilege, so your user account may already run `ping` without sudo. `dohping` detects that and falls back to the system `ping` command, so on a typical Linux or Raspberry Pi OS setup it should work with no configuration at all. Distros differ on how `ping` gets its privileges, and several are moving to stricter defaults, so this depends on the distribution.
