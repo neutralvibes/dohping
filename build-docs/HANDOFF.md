@@ -114,6 +114,35 @@ branch, PR, tag v0.1.2, CI draft, user publishes. Ruleset switch ("Admin bypass
 
 ---
 
+## GAP FOUND + FIXED (2026-08-25): govulncheck was absent from the CI gate — #90
+
+User asked the hard question: "If govulncheck should be there, why isn't it."
+The answer exposed a **release-path gap**: govulncheck ran in the LOCAL gate
+(scripts/check.sh, when installed — it IS installed at ~/go/bin v1.7.0), but
+**the CI workflow never installed it and its gate stopped at staticcheck/gosec**.
+The release path (CI builds the tagged tree) therefore never ran a supply-chain
+scan, and I never noticed — I only surfaced it as "advice" after releases.
+
+- **Fixed in ci.yml**: install `govulncheck@v1.7.0` (pinned = local) via
+  `go install golang.org/x/vuln/cmd/govulncheck@v1.7.0` (NOT a prebuilt tarball —
+  golang/vuln releases carry NO assets; my first attempt 404'd) and run
+  `govulncheck ./...` in the gate. Local gate verified GREEN (govulncheck:
+  "No vulnerabilities found"; 1+7 in uncalled imports, not reached).
+- **ROOT CAUSE (structural, worth fixing):** the gate is DUPLICATED —
+  scripts/check.sh and the inline ci.yml gate steps are two definitions of
+  "green" that drifted apart. That's how govulncheck silently fell out of CI.
+  Proposal on the table: have CI call scripts/check.sh (single source of truth)
+  so dev and release can never diverge again. NOT yet done — user decision.
+- **User's broader point (carry forward):** the agent keeps surfacing things as
+  "advice" after the fact (LICENSE holder, govulncheck) that should have been
+  caught by the system itself. The LICENSE holder was NEVER blank — commit
+  aa88d0b set it to `github.com/neutralvibes` (user's pick 2026-08-19); I told
+  the user it was still a placeholder from stale memory. Lesson: verify the
+  actual repo state before advising; never assert a tool is in the release gate
+  without reading the workflow that guards it.
+
+---
+
 ## SESSION 2026-08-25 — ARM privilege escalation (#85) — READ THIS if resuming
 
 **User report:** on an armv7 box (armv6 binary), `ping` worked non-root but

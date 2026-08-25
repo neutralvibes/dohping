@@ -55,6 +55,15 @@ jobs:
           mv staticcheck/staticcheck /usr/local/bin/
           staticcheck -version
 
+      - name: Install govulncheck (supply-chain, pinned)
+        run: |
+          # govulncheck has no prebuilt release binaries (the golang/vuln
+          # releases carry no assets), so the documented install is
+          # `go install` of the cmd package. Pinned to the same version the
+          # local gate uses (v1.7.0) so CI == dev.
+          GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck -version
+
       - name: Quality gate (gofmt, vet, race, debug build, analyzers)
         run: |
           set -uo pipefail
@@ -69,6 +78,7 @@ jobs:
           golangci-lint run
           staticcheck ./...
           gosec -quiet ./...
+          govulncheck ./...
 
       - name: Fresh build (stale-build trap)
         run: |
