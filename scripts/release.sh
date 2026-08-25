@@ -8,8 +8,10 @@
 #   dohping_<version>_<os>_<arch>.tar.gz    (unix: gzip, exec bit set)
 #   dohping_<version>_<os>_<arch>.zip       (windows: plain dohping.exe)
 # with the PLAIN binary name inside (no os/arch suffix, no version) so a
-# download extracts to a ready-to-run `dohping` / `dohping.exe`. A
-# SHA256SUMS over the archives accompanies them.
+# download extracts to a ready-to-run `dohping` / `dohping.exe`. Every
+# archive also carries the docs alongside the binary: README.md,
+# CHANGELOG.md, and LICENSE — a release download includes the binary AND
+# its documentation. A SHA256SUMS over the archives accompanies them.
 #
 # Usage: ./scripts/release.sh [output-dir]   (default: dist/)
 set -euo pipefail
@@ -42,12 +44,27 @@ mkdir -p "$OUT"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
+# Docs ride in every archive alongside the binary. Fail loudly if any is
+# missing — a release without its docs is a broken release.
+for doc in README.md CHANGELOG.md LICENSE; do
+  if [ ! -f "$ROOT/$doc" ]; then
+    echo "release: $doc missing — cannot package a release without its docs" >&2
+    exit 1
+  fi
+  cp "$ROOT/$doc" "$STAGE/$doc"
+done
+
+# GOOS/GOARCH pairs Go actually supports (verified with `go tool dist
+# list`): darwin has no 32-bit arm, windows has no 32-bit arm. So ARM
+# coverage = linux arm (armv7) + arm64 on linux, darwin, windows.
 targets=(
   "linux amd64"
   "linux arm64"
+  "linux arm"
   "darwin amd64"
   "darwin arm64"
   "windows amd64"
+  "windows arm64"
 )
 
 for target in "${targets[@]}"; do
@@ -63,14 +80,14 @@ for target in "${targets[@]}"; do
     -o "$STAGE/$bin" "$ROOT/cmd/dohping"
 
   base="dohping_${VERSION}_${os}_${arch}"
+  # Package the binary plus the docs (README.md, CHANGELOG.md, LICENSE),
+  # all present in $STAGE. The binary keeps its exec bit in the tar.
   if [ "$os" = "windows" ]; then
     # Zip with the system `zip` (present on the CI runner and dev boxes).
-    (cd "$STAGE" && zip -q "$OUT/$base.zip" "$bin")
+    (cd "$STAGE" && zip -q "$OUT/$base.zip" "$bin" README.md CHANGELOG.md LICENSE)
     echo "packaged $OUT/$base.zip"
   else
-    # The archive must preserve the executable bit so a download extracts
-    # to a runnable binary without a manual chmod.
-    (cd "$STAGE" && tar czf "$OUT/$base.tar.gz" "$bin")
+    (cd "$STAGE" && tar czf "$OUT/$base.tar.gz" "$bin" README.md CHANGELOG.md LICENSE)
     echo "packaged $OUT/$base.tar.gz"
   fi
 done

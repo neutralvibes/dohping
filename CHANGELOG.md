@@ -1,0 +1,29 @@
+# Changelog
+
+All notable changes to dohping are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.1] - 2026-08-25
+
+### Added
+- ARM support. dohping now ships for 32-bit ARM (armv7) and 64-bit ARM
+  (arm64) on every platform that supports them, so it runs on Raspberry Pi
+  and other ARM devices.
+- Release archives carry the docs with the binary: `README.md`,
+  `CHANGELOG.md`, and `LICENSE`.
+
+## [0.1.0] - 2026-08-24
+
+### Added
+- Initial release. Single-host ping/monitoring CLI.
+- Plain line mode (default) and fixed auto-scrolling window mode.
+- ICMP probing with three-tier fallback (raw socket, unprivileged ping
+  socket, system ping) and TCP connect probing.
+- Up/down/error states with hysteresis and RTT statistics.
+- CSV or JSON log output to a file, independent of quiet mode.
+- Liveness animation, resize handling for reflowing terminals, predictable
+  exit codes, interactive `q` quit.
+
+[0.1.1]: https://github.com/neutralvibes/dohping/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/neutralvibes/dohping/releases/tag/v0.1.0
