@@ -15,6 +15,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - Windows release builds strip the symbol table and debug info (`-s -w`):
   the binary is smaller and the antivirus false positive is less likely.
+- ICMP probing now escalates at probe time, not just socket-open time. When
+  an unprivileged socket opens but every probe fails with a non-permission
+  error, dohping falls through to the system `ping` command in the same
+  probe call. The tool now works anywhere `ping` works (including on a
+  Raspberry Pi that ships `/bin/ping` with a setuid bit) instead of showing
+  a bare error and needing `sudo`.
 
 ## [0.1.1] - 2026-08-25
 
