@@ -26,6 +26,7 @@ PUB="$ROOT/publish"
 # --- The contract: what is public -----------------------------------------
 PUBLIC_ITEMS=(
   README.md
+  CHANGELOG.md
   LICENSE
   go.mod
   go.sum

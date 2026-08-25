@@ -54,12 +54,17 @@ for doc in README.md CHANGELOG.md LICENSE; do
   cp "$ROOT/$doc" "$STAGE/$doc"
 done
 
+# GOOS/GOARCH pairs Go actually supports (verified with `go tool dist
+# list`): darwin has no 32-bit arm, windows has no 32-bit arm. So ARM
+# coverage = linux arm (armv7) + arm64 on linux, darwin, windows.
 targets=(
   "linux amd64"
   "linux arm64"
+  "linux arm"
   "darwin amd64"
   "darwin arm64"
   "windows amd64"
+  "windows arm64"
 )
 
 for target in "${targets[@]}"; do

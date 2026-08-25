@@ -10,6 +10,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Release archives now include `README.md`, `CHANGELOG.md`, and `LICENSE`
   alongside the binary.
 
+## [0.1.1] - 2026-08-25
+
+### Added
+- ARM support. dohping now ships for 32-bit ARM (armv7) and 64-bit ARM
+  (arm64) on every platform that supports them, so it runs on Raspberry Pi
+  and other ARM devices.
+- Release archives carry the docs with the binary: `README.md`,
+  `CHANGELOG.md`, and `LICENSE`.
+
 ## [0.1.0] - 2026-08-24
 
 ### Added
@@ -22,5 +31,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Liveness animation, resize handling for reflowing terminals, predictable
   exit codes, interactive `q` quit.
 
-[Unreleased]: https://github.com/neutralvibes/dohping/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/neutralvibes/dohping/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/neutralvibes/dohping/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/neutralvibes/dohping/releases/tag/v0.1.0

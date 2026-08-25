@@ -7,7 +7,7 @@ import "runtime/debug"
 // build time:
 //
 //	go build -ldflags "-X dohping/internal/version.Version=v1.2.3"
-var Version = "0.1.0"
+var Version = "0.1.1"
 
 // Commit is the VCS revision at build time (short form). Overridable via
 // ldflags; falls back to module build info when empty.
