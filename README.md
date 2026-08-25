@@ -150,6 +150,18 @@ Or right-click the zip and choose Extract All. The binary runs directly from the
 
 To run `dohping` from any folder, add the extracted directory to your PATH.
 
+## ⚠️ Note on Windows Defender (Wacatac.C!ml False Positive)
+
+When downloading or compiling this utility on Windows, Windows Defender may flag the executable as `Trojan:Win32/Wacatac.C!ml`.
+
+This is a well-known **false positive** triggered by Windows' machine-learning algorithm. Because Go binaries are statically compiled and this tool interacts directly with Windows console API flags (to enable terminal colors), the antivirus erroneously guesses it is a threat due to its lack of a global digital signature.
+
+### How to resolve:
+
+1. You can verify the source code yourself. It contains no malicious payloads.
+2. If compiling locally, add your build directory to your Windows Defender exclusion list.
+3. If using the pre-compiled binary, you can click "Allow on device" within Windows Security's protection history.
+
 ### Permissions
 
 Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. On some distributions this is handled by giving `ping` itself the privilege, so your user account may already run `ping` without sudo. `dohping` detects that and falls back to the system `ping` command, so on a typical Linux or Raspberry Pi OS setup it should work with no configuration at all. Distros differ on how `ping` gets its privileges, and several are moving to stricter defaults, so this depends on the distribution.

@@ -4,6 +4,18 @@ All notable changes to dohping are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- README note explaining the Windows Defender `Trojan:Win32/Wacatac.C!ml`
+  false positive and how to handle it: verify the source, add a Defender
+  exclusion when compiling locally, or choose "Allow on device" in Windows
+  Security's protection history.
+
+### Changed
+- Windows release builds strip the symbol table and debug info (`-s -w`):
+  the binary is smaller and the antivirus false positive is less likely.
+
 ## [0.1.1] - 2026-08-25
 
 ### Added

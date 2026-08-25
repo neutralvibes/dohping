@@ -71,17 +71,24 @@ No em-dashes, human prose.
   #85), `dohping-windows-amd64-14338619.exe` (VT+spinner, the verified-good
   Windows build).
 
-### OPEN DECISION — how to handle Windows for v0.1.2
-**RESOLVED (2026-08-25): code signing is OFF the table.** User: "code signing
-is expensive for a free tool." No OV cert, no Azure Trusted Signing. (Cost /
-identity-verification friction doesn't pay back for a free tool with a
-Linux/Pi core audience.) Remaining fork — still open, clarify came back empty
-a second time:
-1. Defer Windows: v0.1.2 ships Linux/Pi/macOS only; the verified Windows build
-   (#87) stays on the rig. User's earlier lean.
-2. Ship Windows with a documented Defender false-positive note (README Windows
-   section + release notes) — keeps README's Windows install section live.
-Do not pick for them; default to (1) if pushed.
+### Windows decision — RESOLVED (2026-08-25): ship Windows in v0.1.2 with a documented note
+- **Code signing: OFF the table** (user: "code signing is expensive for a free
+  tool"). No OV cert, no Azure Trusted Signing. The cost/identity friction
+  doesn't pay back for a free tool with a Linux/Pi core audience.
+- **Windows ships in v0.1.2** (defer-Windows lean dropped) with two mitigations
+  (#89, committed):
+  1. **`-s -w` strip on Windows builds only** (release.sh): strips symbol table
+     + DWARF debug info. Measured: windows/amd64 5,212,160 → 3,532,800 bytes
+     (32% smaller). Byte-deterministic across rebuilds (sha f6ea1c7d…),
+     `-X` version injection survives stripping (verified on a stripped Linux
+     test build: `--version` → `dohping 0.1.1`, TCP probe clean). Not a
+     guaranteed fix — Wacatac.C!ml is ML-driven — but a real reported
+     mitigation. Other platforms keep debug info for readable crash traces.
+  2. **README "Note on Windows Defender (Wacatac.C!ml False Positive)"** —
+     user-authored, in the Windows install section. Three resolutions: verify
+     source, Defender exclusion for local compiles, "Allow on device" in
+     Windows Security.
+- CHANGELOG `[Unreleased]` carries both changes.
 
 ### NEXT for v0.1.2 (unchanged from part 1)
 Re-derive `publish/` (one commit behind; CHANGELOG now in PUBLIC_ITEMS), push

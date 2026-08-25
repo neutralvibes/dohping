@@ -83,8 +83,17 @@ for target in "${targets[@]}"; do
   if [ -n "$goarm" ]; then
     envs+=("GOARM=$goarm")
   fi
+  ldflags="-X dohping/internal/version.Version=$VERSION"
+  if [ "$os" = "windows" ]; then
+    # Windows release builds strip the symbol table and DWARF debug info
+    # (-s -w): the binary is smaller, and Windows Defender's machine-learning
+    # scanner has less to pattern-match, which reduces the Wacatac.C!ml false
+    # positive. Other platforms keep their debug info so crash traces stay
+    # readable.
+    ldflags="$ldflags -s -w"
+  fi
   env "${envs[@]}" "$GOROOT_BIN/go" build -trimpath -buildvcs=false \
-    -ldflags "-X dohping/internal/version.Version=$VERSION" \
+    -ldflags "$ldflags" \
     -o "$STAGE/$bin" "$ROOT/cmd/dohping"
 
   base="dohping_${VERSION}_${os}_${assetarch}"
