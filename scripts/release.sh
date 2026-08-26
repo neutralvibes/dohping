@@ -41,7 +41,22 @@ else
   echo "release: scripts/check.sh not present (dev-only) — skipping local gate; CI gate already ran" >&2
 fi
 
-VERSION="${DOHPING_VERSION:-$(grep -m1 'Version = ' "$ROOT/internal/version/version.go" | sed -E 's/.*"([^"]+)".*/\1/')}"
+# Version source of truth: the version.go constant is authoritative for
+# BOTH dev builds and releases. When this tree is exactly at a version tag
+# (CI release runs are triggered BY the tag), the tag must AGREE with the
+# constant — a mismatch is a hard error, never a silently wrong-version
+# archive. DOHPING_VERSION overrides the constant for ad-hoc builds.
+CONST_VERSION="$(grep -m1 'Version = ' "$ROOT/internal/version/version.go" | sed -E 's/.*"([^"]+)".*/\1/')"
+VERSION="$CONST_VERSION"
+if tag="$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null)"; then
+  VERSION="${tag#v}"
+  if [ "$VERSION" != "$CONST_VERSION" ]; then
+    echo "release: FATAL — version.go says $CONST_VERSION but this tree is tagged $tag." >&2
+    echo "release: bump internal/version/version.go to match the release tag (they must never drift)." >&2
+    exit 1
+  fi
+fi
+VERSION="${DOHPING_VERSION:-$VERSION}"
 GOROOT_BIN="${GOROOT:-$(go env GOROOT)}/bin"
 
 rm -rf "$OUT"
