@@ -12,16 +12,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exclusion when compiling locally, or choose "Allow on device" in Windows
   Security's protection history.
 
-### Changed
-- Release binaries strip the symbol table and debug info (`-s -w`):
-  smaller downloads and less for antivirus heuristics to pattern-match.
+### Fixed
 - Windows: color now renders in classic cmd.exe and PowerShell (ANSI
   virtual terminal processing enabled), and the liveness bar falls back to
   an ASCII spinner where the block glyphs are unavailable.
-- `-n` is a shortcut for `--no-color`.
+- `-n` is now a shortcut for `--no-color`.
 - ICMP probing now falls back to the system `ping` when a socket opens but
   every probe fails, so `dohping` works wherever `ping` works instead of
   showing a bare error and needing `sudo`.
+- Release binaries are now stripped (`-s -w`): smaller downloads and less
+  for antivirus heuristics to pattern-match.
 
 ## [0.1.1] - 2026-08-25
 
