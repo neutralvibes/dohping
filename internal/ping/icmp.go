@@ -11,6 +11,8 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+
+	"dohping/internal/debugx"
 )
 
 // ICMPProbe sends ICMP echo requests over a privileged raw socket
@@ -25,18 +27,23 @@ type ICMPProbe struct {
 	isV6    bool
 }
 
-// NewICMPProbe resolves host once and opens the ICMP socket. A non-nil
-// error is operational (permission denied, unsupported network, DNS
-// failure) and must be reported as such — never as host-down.
+// NewICMPProbe resolves host once and builds the ICMP fallback chain. A
+// non-nil error is operational (permission denied, unsupported network,
+// DNS failure) and must be reported as such — never as host-down.
 //
-// Three tiers are tried in order (DECISIONS #49):
+// Three tiers are tried in order:
 //
 //  1. privileged raw socket ("ip4:icmp"/"ip6:ipv6-icmp", CAP_NET_RAW on
 //     Linux),
 //  2. unprivileged ping socket ("udp4"/"udp6", governed by
 //     net.ipv4.ping_group_range),
-//  3. the system ping command (works where the sandbox elevates /bin/ping
-//     but our process holds no privileges).
+//  3. the system ping command (works in restricted environments where
+//     /bin/ping is elevated but the process holds no privileges).
+//
+// The result is a fallbackProbe that escalates through the tiers when the
+// active one fails (see fallback.go). The system ping tier stays in the
+// chain even when a socket opened, because a socket can open and still
+// fail every probe — the fallback covers that by escalating to ping.
 //
 // When every tier is unavailable, the error carries the socket permission
 // failure so callers can print helpful guidance.
@@ -53,21 +60,35 @@ func NewICMPProbe(host string, timeout time.Duration) (Probe, error) {
 		unprivNet = "udp6"
 	}
 
+	tiers := make([]*fallbackTier, 0, 3)
+	var socketErr error
 	// Tier 1: privileged raw socket.
-	conn, err := icmp.ListenPacket(rawNet, "")
-	if err == nil {
-		return newICMPProbe(conn, ip.IP, isV6, timeout), nil
+	if conn, e := icmp.ListenPacket(rawNet, ""); e == nil {
+		tiers = append(tiers, &fallbackTier{name: "raw socket", probe: newICMPProbe(conn, ip.IP, isV6, timeout)})
+	} else {
+		socketErr = e
+		debugx.Debugf("probe", "tier raw socket unavailable: %v", e)
 	}
 	// Tier 2: unprivileged ping socket.
-	conn, err2 := icmp.ListenPacket(unprivNet, "")
-	if err2 == nil {
-		return newICMPProbe(conn, ip.IP, isV6, timeout), nil
+	if conn, e := icmp.ListenPacket(unprivNet, ""); e == nil {
+		tiers = append(tiers, &fallbackTier{name: "ping socket", probe: newICMPProbe(conn, ip.IP, isV6, timeout)})
+	} else {
+		if socketErr == nil {
+			socketErr = e
+		}
+		debugx.Debugf("probe", "tier ping socket unavailable: %v", e)
 	}
 	// Tier 3: system ping command.
 	if p, perr := newPingCmdProbe(ip.IP.String(), timeout); perr == nil {
-		return p, nil
+		tiers = append(tiers, &fallbackTier{name: "system ping", probe: p})
+	} else {
+		debugx.Debugf("probe", "tier system ping unavailable: %v", perr)
 	}
-	return nil, fmt.Errorf("unable to create ICMP socket: %w", err)
+	if len(tiers) == 0 {
+		return nil, fmt.Errorf("unable to create ICMP socket: %w", socketErr)
+	}
+	debugx.Debugf("probe", "ICMP fallback chain: %d tier(s), starting on %q", len(tiers), tiers[0].name)
+	return &fallbackProbe{tiers: tiers}, nil
 }
 
 func newICMPProbe(conn *icmp.PacketConn, ip net.IP, isV6 bool, timeout time.Duration) *ICMPProbe {

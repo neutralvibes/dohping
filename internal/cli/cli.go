@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// Defaults — the CLI contract defaults (spec §16).
+// Defaults — the CLI contract defaults.
 const (
 	DefaultInterval       = 1 * time.Second
 	DefaultTimeout        = 2 * time.Second
@@ -27,7 +27,7 @@ const (
 	DefaultProbe          = "icmp"
 	DefaultColorMode      = "auto"
 	DefaultLiveMode       = "auto"
-	DefaultLogFormat      = "text"
+	DefaultLogFormat      = "csv"
 	DefaultTimestampFmt   = "HH:MM:SS"
 	MaxHostWidth          = 40
 	MinHostWidth          = 15
@@ -71,11 +71,13 @@ type Options struct {
 	NoWindow    bool
 	WindowLines int
 
+	Bell bool
+
 	DownAfter int
 	UpAfter   int
 
 	LogFile   string
-	LogFormat string // text | json
+	LogFormat string // csv | json
 
 	TimestampFormat string // HH:MM:SS | rfc3339
 
@@ -155,7 +157,7 @@ func Parse(args []string) (*Options, Action, error) {
 	fs.SetOutput(io.Discard) // we own all output
 	fs.Usage = func() {}
 
-	// Basic options (spec §16.1).
+	// Basic options.
 	fs.BoolVar(&opts.Help, "h", false, "")
 	fs.BoolVar(&opts.Help, "help", false, "")
 	fs.BoolVar(&opts.Version, "V", false, "")
@@ -176,11 +178,12 @@ func Parse(args []string) (*Options, Action, error) {
 	fs.IntVar(&opts.UpAfter, "u", opts.UpAfter, "")
 	fs.IntVar(&opts.UpAfter, "up-after", opts.UpAfter, "")
 
-	// Display options (spec §16.2).
+	// Display options.
 	fs.BoolVar(&opts.Quiet, "q", false, "")
 	fs.BoolVar(&opts.Quiet, "quiet", false, "")
 	fs.BoolVar(&opts.NoHeader, "no-header", false, "")
 	fs.BoolVar(&opts.NoColor, "no-color", false, "")
+	fs.BoolVar(&opts.NoColor, "n", false, "") // shortcut: -n for no color
 	fs.StringVar(&opts.ColorMode, "color", opts.ColorMode, "")
 	fs.StringVar(&opts.LiveMode, "live", opts.LiveMode, "")
 	fs.BoolVar(&opts.NoLive, "no-live", false, "")
@@ -189,8 +192,9 @@ func Parse(args []string) (*Options, Action, error) {
 	fs.BoolVar(&opts.NoWindow, "no-window", false, "")
 	fs.IntVar(&opts.WindowLines, "window-lines", opts.WindowLines, "")
 	fs.StringVar(&opts.TimestampFormat, "timestamp-format", opts.TimestampFormat, "")
+	fs.BoolVar(&opts.Bell, "bell", false, "")
 
-	// Logging options (spec §16.3).
+	// Logging options.
 	fs.StringVar(&opts.LogFile, "l", "", "")
 	fs.StringVar(&opts.LogFile, "log-file", "", "")
 	fs.StringVar(&opts.LogFormat, "log-format", opts.LogFormat, "")
@@ -226,7 +230,7 @@ func Parse(args []string) (*Options, Action, error) {
 			opts.windowLinesSet = true
 		case "window", "w":
 			opts.windowSet = true
-		case "no-color":
+		case "no-color", "n":
 			opts.noColorSet = true
 		case "color":
 			opts.colorSet = true
@@ -265,7 +269,7 @@ func Parse(args []string) (*Options, Action, error) {
 // conflicts. It mutates opts where parsing derives values (probe details,
 // window inference).
 func validate(opts *Options) error {
-	// Conflicts first — never silently resolve ambiguity (spec §16.4).
+	// Conflicts first — never silently resolve ambiguity.
 	if opts.noWindowSet && opts.windowLinesSet {
 		return usageErrorf("--no-window conflicts with --window-lines: remove one of them")
 	}
@@ -279,7 +283,7 @@ func validate(opts *Options) error {
 		return usageErrorf("--no-live conflicts with --live=on: remove one of them")
 	}
 
-	// --window-lines implies --window (spec §8.1, §16.2).
+	// --window-lines implies --window.
 	if opts.windowLinesSet {
 		opts.Window = true
 	}
@@ -318,9 +322,9 @@ func validate(opts *Options) error {
 		return usageErrorf("invalid live mode %q: must be auto, on, or off", opts.LiveMode)
 	}
 	switch opts.LogFormat {
-	case "text", "json":
+	case "csv", "json":
 	default:
-		return usageErrorf("invalid log format %q: must be text or json", opts.LogFormat)
+		return usageErrorf("invalid log format %q: must be csv or json", opts.LogFormat)
 	}
 	switch opts.TimestampFormat {
 	case "HH:MM:SS", "rfc3339":

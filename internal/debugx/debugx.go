@@ -1,10 +1,16 @@
-// Package debugx is the optional diagnostic logger (DECISIONS #74): a
-// no-op by default, enabled by the DOHPING_DEBUG environment variable (a
-// file path) or in code via SetWriter. It exists because terminal-resize
-// forensics need the app's OWN observations: no terminal displays the
-// width it is resizing to, so a drag's sweep — every width passed, every
-// freeze/defer decision — is reconstructable only from the app's log,
-// never from screenshots or the user's eyes (user direction 2026-08-18).
+//go:build debug
+
+// Package debugx is the optional diagnostic logger. It is compiled OUT of
+// release builds — this file exists only under `-tags debug` (see
+// debugx_stub.go for the inert release counterpart, and
+// debugx_stub_test.go for the CI gate proving release binaries can't
+// write a debug log). A debug build is enabled by the DOHPING_DEBUG
+// environment variable (a file path) or in code via SetWriter. It exists
+// because terminal-resize forensics need the app's OWN observations: no
+// terminal displays the width it is resizing to, so a drag's sweep —
+// every width passed, every freeze/defer decision — is reconstructable
+// only from the app's log, never from screenshots or the user's eyes
+// (user direction 2026-08-18).
 //
 // The display owns the terminal, so debug output NEVER goes there: it is
 // file-only by design (or an injected writer, in tests). A debug log

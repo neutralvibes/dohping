@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"syscall"
 	"time"
 )
 
 // TCPProbe connects to a resolved TCP address. No privileges required.
 //
-// Semantics (spec §4.1): established or refused → up (a refusal proves the
+// Semantics: established or refused → up (a refusal proves the
 // host answered); timeout → down (SYN silently dropped); DNS/routing or
 // other operational errors → error.
 type TCPProbe struct {
@@ -55,8 +54,9 @@ func classifyDialError(err error, rtt time.Duration) Result {
 	if errors.As(err, &ne) && ne.Timeout() {
 		return Result{Outcome: OutcomeDown}
 	}
-	// The host answered "no" — that proves it is alive.
-	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) {
+	// The host answered "no" — that proves it is alive. On POSIX this is
+	// ECONNREFUSED/ECONNRESET; Windows surfaces it as WSAECONNREFUSED.
+	if isRefused(err) {
 		return Result{Outcome: OutcomeUp, RTT: rtt}
 	}
 	// Cancellation during shutdown: the loop drops this result anyway.

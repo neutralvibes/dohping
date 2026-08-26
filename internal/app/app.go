@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/term"
 
+	"dohping/internal/bellx"
 	"dohping/internal/cli"
 	"dohping/internal/debugx"
 	"dohping/internal/logx"
@@ -25,7 +26,7 @@ import (
 	"dohping/internal/version"
 )
 
-// Exit codes (spec §18).
+// Exit codes.
 const (
 	ExitOK         = 0
 	ExitError      = 1
@@ -74,25 +75,24 @@ const (
 	keyEOF                   // stdin closed
 )
 
-// cprEvent was removed with the DSR/CPR re-anchor machinery (DECISIONS
-// #67): ConPTY reports unreliable cursor positions on resize, so the
-// displays freeze-and-restart instead of querying the terminal.
+// cprEvent was removed with the DSR/CPR re-anchor machinery: ConPTY
+// reports unreliable cursor positions on resize, so the displays
+// freeze-and-restart instead of querying the terminal.
 
 // Main is the process entry point: parse args, dispatch, return exit code.
 // Stdout/stderr/tty are injected so tests can capture output.
 func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
-	// Optional diagnostic logger (DECISIONS #74): DOHPING_DEBUG=<path>
-	// enables the resize/redraw forensics file — the app's own record of
-	// the widths a resize drag passes through (no terminal displays
-	// them). File-only: the display owns the terminal, so debug output
-	// never goes there.
+	// Optional diagnostic logger: DOHPING_DEBUG=<path> enables the
+	// resize/redraw forensics file — the app's own record of the widths a
+	// resize drag passes through (no terminal displays them). File-only:
+	// the display owns the terminal, so debug output never goes there.
 	debugx.Init()
 	defer debugx.Close()
 
 	opts, action, err := cli.Parse(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "dohping: %v\n", err)
-		fmt.Fprintf(stderr, "run 'dohping --help' for usage\n")
+		_, _ = fmt.Fprintf(stderr, "dohping: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "run 'dohping --help' for usage\n")
 		return ExitUsage
 	}
 
@@ -101,7 +101,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		cli.WriteHelp(stdout)
 		return ExitOK
 	case cli.ActionVersion:
-		fmt.Fprintln(stdout, version.String())
+		_, _ = fmt.Fprintln(stdout, version.String())
 		return ExitOK
 	}
 
@@ -109,13 +109,13 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	// with guidance — never a host-down condition.
 	pr, err := buildProbe(opts)
 	if err != nil {
-		fmt.Fprintf(stderr, "dohping: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "dohping: %v\n", err)
 		if ping.IsPermissionError(err) {
-			fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary)")
+			_, _ = fmt.Fprintln(stderr, permissionHint())
 		}
 		return ExitProbeInit
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	eng := state.New(opts.DownAfter, opts.UpAfter)
 
@@ -124,10 +124,10 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	if opts.LogFile != "" {
 		logger, err = logx.Open(opts.LogFile, opts.LogFormat, opts.Host)
 		if err != nil {
-			fmt.Fprintf(stderr, "dohping: unable to open log file %q: %v\n", opts.LogFile, err)
+			_, _ = fmt.Fprintf(stderr, "dohping: unable to open log file %q: %v\n", opts.LogFile, err)
 			return ExitError
 		}
-		defer logger.Close()
+		defer func() { _ = logger.Close() }()
 	}
 
 	colorEnabled := theme.Enabled(theme.Config{NoColor: opts.NoColor, ColorMode: opts.ColorMode},
@@ -142,15 +142,15 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	if tty.Stdin && tty.StdinFile != nil {
 		restore, kerr := startKeyReader(tty.StdinFile, keyCh)
 		if kerr != nil {
-			fmt.Fprintf(stderr, "dohping: warning: cannot configure interactive quit: %v\n", kerr)
+			_, _ = fmt.Fprintf(stderr, "dohping: warning: cannot configure interactive quit: %v\n", kerr)
 		} else {
 			defer restore()
 		}
 	} else {
-		close(keyCh) // no key handling with piped stdin (spec §15.4)
+		close(keyCh) // no key handling with piped stdin
 	}
 
-	// Display selection (spec §17): quiet suppresses all; window mode needs
+	// Display selection: quiet suppresses all; window mode needs
 	// a terminal (else fall back to plain mode with a warning); otherwise
 	// plain line mode.
 	var disp displayer
@@ -168,7 +168,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		winchCh = c
 	} else {
 		if opts.Window && !opts.Quiet {
-			fmt.Fprintln(stderr, "dohping: warning: --window requires a terminal; falling back to plain line mode")
+			_, _ = fmt.Fprintln(stderr, "dohping: warning: --window requires a terminal; falling back to plain line mode")
 		}
 		disp = output.NewDisplay(stdout, layout, opts.Quiet, opts.NoHeader, live,
 			defaultSizeFn(stdout))
@@ -189,6 +189,15 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	defer cancel()
 	sigCh, stopSig := signalx.Listen()
 	defer stopSig()
+
+	// Terminal bell: a peer consumer of the event stream, like the
+	// logger — the display layer never knows it exists. It sounds only
+	// when requested, on a real terminal, and not in quiet mode (quiet
+	// suppresses all output, and the bell is output).
+	var bell *bellx.Bell
+	if opts.Bell && tty.Stdout && !opts.Quiet {
+		bell = bellx.New(stdout, true)
+	}
 
 	// The liveness animation advances on a fixed 1-second timer,
 	// independent of probe cadence: with a long --interval the probe
@@ -218,9 +227,18 @@ loop:
 			if !ok {
 				break loop // Run finished: count exhausted or cancelled
 			}
+			if bell != nil {
+				bell.Handle(ev) // leading standalone \a on a status change
+			}
 			disp.Handle(ev)
 			if logger != nil {
 				logEvent(logger, ev)
+			}
+			// Record every probe error in the debug log: the exact
+			// failure reason on the user's box is the evidence for any
+			// tier-escalation report (debug build only).
+			if (ev.Kind == state.EventError || ev.Kind == state.EventProbeError) && ev.Err != nil {
+				debugx.Debugf("probe", "probe error: %v", ev.Err)
 			}
 			// A permission-class operational error (raw socket, ping
 			// socket, or ping command denied) is permanent — abort with
@@ -256,12 +274,10 @@ loop:
 			// Immediate repaint on terminal resize (Unix SIGWINCH fast
 			// path). Tick is the right repaint for both displays: Window
 			// redraws the block, Display refreshes the live line — both
-			// notice the width change and freeze/restart as needed
-			// (DECISIONS #67). On Windows the channel never fires — the
-			// 1-second tick covers resizes there (platform-split,
-			// DECISIONS #64/#65). Debug forensics (#74): whether ConPTY
-			// → WSL2 even delivers SIGWINCH is itself a fact the log
-			// must record.
+			// notice the width change and freeze/restart as needed. On
+			// Windows the channel never fires — the 1-second tick covers
+			// resizes there. Debug forensics: whether ConPTY → WSL2 even
+			// delivers SIGWINCH is itself a fact the log must record.
 			debugx.Debugf("winch", "SIGWINCH received → repaint")
 			disp.Tick()
 		case <-tickCh:
@@ -279,8 +295,8 @@ loop:
 	if reason == stopPerm {
 		// Permission problem: report with guidance, exit 3 — never a
 		// host-down condition, never an endless error state.
-		fmt.Fprintf(stderr, "dohping: %v\n", permErr)
-		fmt.Fprintln(stderr, "hint: run with elevated privileges or grant CAP_NET_RAW (e.g. setcap cap_net_raw+ep on the binary); on some systems the ping command itself needs privileges")
+		_, _ = fmt.Fprintf(stderr, "dohping: %v\n", permErr)
+		_, _ = fmt.Fprintln(stderr, permissionHint())
 		return ExitProbeInit
 	}
 	if !opts.Quiet && tty.Stdout {
@@ -316,6 +332,23 @@ func defaultSizeFn(w io.Writer) func() (int, int) {
 	}
 }
 
+// classifyKey maps a raw-mode byte to a keyEvent. q/Q quits (exit 0),
+// 0x03 (Ctrl-C in raw mode, ISIG off) interrupts (exit 130), Ctrl-D is
+// EOF for the reader. Unknown bytes return ok=false and are ignored.
+// Extracted from startKeyReader so the byte-mapping contract is testable
+// without a PTY.
+func classifyKey(b byte) (keyEvent, bool) {
+	switch b {
+	case 'q', 'Q':
+		return keyQuit, true
+	case 0x03:
+		return keyCtrlC, true
+	case 0x04: // Ctrl-D: EOF for the reader, terminal restored
+		return keyEOF, true
+	}
+	return 0, false
+}
+
 // startKeyReader puts stdin into raw mode and reads keys in a goroutine.
 // q/Q quits (exit 0); 0x03 (Ctrl-C in raw mode, ISIG off) interrupts
 // (exit 130). Other bytes (arrows, ESC, …) are consumed and ignored. The
@@ -337,15 +370,8 @@ func startKeyReader(f *os.File, out chan<- keyEvent) (restore func(), err error)
 				out <- keyEOF
 				return
 			}
-			switch b {
-			case 'q', 'Q':
-				out <- keyQuit
-				return
-			case 0x03:
-				out <- keyCtrlC
-				return
-			case 0x04: // Ctrl-D: EOF for the reader, terminal restored
-				out <- keyEOF
+			if ev, ok := classifyKey(b); ok {
+				out <- ev
 				return
 			}
 		}
@@ -385,29 +411,28 @@ func logFinal(l *logx.Logger, host string, eng *state.Engine) {
 	})
 }
 
-// printSummary renders the optional exit summary (spec §15.3), shown only
+// printSummary renders the optional exit summary, shown only
 // on interactive terminals so scripted/piped output stays parseable.
 //
 // Every line is \r-prefixed AND \r\n-terminated: after Finalize the
 // cursor may sit anywhere (live mode ends mid-line on terminals without
 // ONLCR), so each line explicitly resets to column 0 before writing and
-// lands at column 0 of the next line after (DECISIONS #54 lesson, user
-// report 2026-08-17 — the summary previously drifted progressively
-// right until the terminal wrapped).
+// lands at column 0 of the next line after (the summary previously
+// drifted progressively right until the terminal wrapped).
 func printSummary(w io.Writer, host string, eng *state.Engine, runDuration time.Duration) {
 	probes, ok, fail := eng.Totals()
 	loss := 0.0
 	if probes > 0 {
 		loss = float64(fail) / float64(probes) * 100
 	}
-	fmt.Fprintf(w, "\r--- dohping summary ---\r\n")
-	fmt.Fprintf(w, "\r%-16s %s\r\n", "host:", host)
-	fmt.Fprintf(w, "\r%-16s %s\r\n", "current status:", eng.Status())
-	fmt.Fprintf(w, "\r%-16s %s\r\n", "run duration:", formatRunDuration(runDuration))
-	fmt.Fprintf(w, "\r%-16s %d\r\n", "total probes:", probes)
-	fmt.Fprintf(w, "\r%-16s %d\r\n", "successful:", ok)
-	fmt.Fprintf(w, "\r%-16s %d\r\n", "failed:", fail)
-	fmt.Fprintf(w, "\r%-16s %.2f%%\r\n", "loss:", loss)
+	_, _ = fmt.Fprintf(w, "\r--- dohping summary ---\r\n")
+	_, _ = fmt.Fprintf(w, "\r%-16s %s\r\n", "host:", host)
+	_, _ = fmt.Fprintf(w, "\r%-16s %s\r\n", "current status:", eng.Status())
+	_, _ = fmt.Fprintf(w, "\r%-16s %s\r\n", "run duration:", formatRunDuration(runDuration))
+	_, _ = fmt.Fprintf(w, "\r%-16s %d\r\n", "total probes:", probes)
+	_, _ = fmt.Fprintf(w, "\r%-16s %d\r\n", "successful:", ok)
+	_, _ = fmt.Fprintf(w, "\r%-16s %d\r\n", "failed:", fail)
+	_, _ = fmt.Fprintf(w, "\r%-16s %.2f%%\r\n", "loss:", loss)
 }
 
 func formatRunDuration(d time.Duration) string {
@@ -422,4 +447,11 @@ func buildProbe(opts *cli.Options) (ping.Probe, error) {
 	default:
 		return ping.NewICMPProbe(opts.Host, opts.Timeout)
 	}
+}
+
+// permissionHint is the guidance printed whenever every probe path is
+// denied. The TCP probe is the no-privileges answer, so it is named
+// first-class alongside elevation and the capability grant.
+func permissionHint() string {
+	return "hint: run with elevated privileges, grant CAP_NET_RAW (sudo setcap cap_net_raw=+ep <path-to-dohping>), or use --probe tcp which needs no privileges"
 }

@@ -1,6 +1,6 @@
 // Package output renders the state engine's events as the plain line
-// display (spec §7, §9, §10): fixed-width columns, live-updating current
-// line, finalization, non-TTY hygiene. Window mode (Phase 5) reuses the
+// display: fixed-width columns, live-updating current
+// line, finalization, non-TTY hygiene. Window mode reuses the
 // same Layout and Line types.
 package output
 
@@ -15,12 +15,12 @@ import (
 	"dohping/internal/theme"
 )
 
-// Column width policy (spec §9.4 + DECISIONS): HOST is the elastic
+// Column width policy: HOST is the elastic
 // column — computed from the host at startup (min 15, max 40, truncated
-// with …) and re-computed on terminal resize (DECISIONS #64: it expands
+// with …) and re-computed on terminal resize (it expands
 // to fill available width up to the max, and retracts to the min rather
 // than letting the line wrap). DURATION capped at 99d+.
-// Column starts (verified against the spec §7.4 header, DECISIONS #68):
+// Column starts (verified against the published header example):
 //
 //	0        10       26       32       47       55       63       71
 //	TIME      HOST            STATE   DURATION       MIN     MAX     AVG     FAILS
@@ -32,7 +32,7 @@ const (
 
 // Layout computes column widths and renders header and lines. Widths are
 // cell counts (runes), never bytes — multibyte glyphs (…, the animation
-// bars, non-ASCII hosts) must not shift columns (DECISIONS #64).
+// bars, non-ASCII hosts) must not shift columns.
 type Layout struct {
 	host        string // raw target (for re-truncation on resize)
 	hostWidth   int
@@ -46,7 +46,7 @@ type Layout struct {
 // rightCols are the four rightmost columns in retention order. On a
 // terminal too narrow for the full line the window layout drops them from
 // the RIGHT (FAILS first) so the line keeps fitting instead of wrapping
-// (DECISIONS #71 — the user's "trim the output line so last columns start
+// (the user's "trim the output line so last columns start
 // disappearing"). Each is 8 cells including its leading separator, so a
 // retained count of r leaves fixed + 8r cells (fixed = 47 at HH:MM:SS and
 // the HOST-15 floor).
@@ -68,7 +68,7 @@ func NewLayout(host, timeFormat string, th *theme.Renderer) *Layout {
 		host:       host,
 		timeFormat: timeFormat,
 		timeWidth:  tw,
-		retained:   4, // full line until a narrow terminal drops columns (DECISIONS #71)
+		retained:   4, // full line until a narrow terminal drops columns
 		theme:      th,
 	}
 	l.setHostWidth(hostWidthFor(host))
@@ -79,20 +79,20 @@ func NewLayout(host, timeFormat string, th *theme.Renderer) *Layout {
 // separators) — the part of the line that never flexes. This must stay in
 // sync with the join in formatLine: TIME + 2sp + STATE(5) + 1sp +
 // DURATION(14) + 1sp + MIN(7) + 1sp + MAX(7) + 1sp + AVG(7) + 1sp +
-// FAILS(8) = timeWidth + 56 (DECISIONS #68: STATE 5 wide, minimum line
+// FAILS(8) = timeWidth + 56 (STATE 5 wide, minimum line
 // 79 cells — under 80).
 func (l *Layout) fixedWidth() int { return l.timeWidth + 56 }
 
 // Resize re-computes the layout for a terminal of the given width (cells).
-// HOST is the elastic column (DECISIONS #64, user-approved 2026-08-17):
+// HOST is the elastic column (user-approved 2026-08-17):
 // content-fit with a terminal cap — as wide as the host's own length
-// (clamped to spec §9.4's [15, 40]) but never wider than the terminal
+// (clamped to min 15, max 40) but never wider than the terminal
 // leaves after the fixed columns; a narrow terminal retracts the column
 // rather than wrapping. Once HOST hits its 15-cell floor, the four
-// rightmost columns drop from the RIGHT (DECISIONS #71) so the line still
+// rightmost columns drop from the RIGHT so the line still
 // fits: at 79 cells all four, then FAILS, AVG, MAX, MIN (~8 cells each) —
 // down to the essentials-only floor of 47 cells (HH:MM:SS). Only below
-// that floor does the line wrap (documented limitation, DECISIONS #64).
+// that floor does the line wrap (documented limitation).
 // width ≤ 0 (unknown) leaves the layout unchanged.
 func (l *Layout) Resize(width int) {
 	if width <= 0 {
@@ -130,7 +130,7 @@ func (l *Layout) setHostWidth(w int) {
 	l.displayHost = truncateHost(l.host, w)
 }
 
-// hostWidthFor is the startup policy (spec §9.4): the host's own length,
+// hostWidthFor is the startup policy: the host's own length,
 // clamped — the column is as wide as the target needs.
 func hostWidthFor(host string) int {
 	w := utf8.RuneCountInString(host)
@@ -172,7 +172,20 @@ func (l *Layout) Header() string {
 // minimum), one frame per probe event (user request 2026-08-17). The bar
 // rises then resets — the reset jump is the visible "tick" that draws the
 // eye.
+//
+// Classic Windows consoles (cmd.exe, PowerShell) cannot render the block
+// glyphs (U+2581..U+2587) with their codepage fonts, so main.go swaps in
+// an ASCII spinner on those platforms via SetFrames.
 var liveFrames = []rune{'▁', '▃', '▅', '▇'}
+
+// SetFrames replaces the liveness animation frame set. Called once at
+// startup on platforms whose console cannot render the default glyphs.
+// Safe to call before any display exists.
+func SetFrames(frames []rune) {
+	if len(frames) > 0 {
+		liveFrames = frames
+	}
+}
 
 // frameChar returns the animation frame for counter n (cycles).
 func frameChar(n int) rune { return liveFrames[n%len(liveFrames)] }
@@ -181,7 +194,7 @@ func frameChar(n int) rune { return liveFrames[n%len(liveFrames)] }
 // are blank unless up; FAILS is blank unless down. Trailing whitespace is
 // trimmed. Colors are applied per field when the theme is active. The
 // DURATION↔MIN separator is a plain space: finalized/history lines and
-// piped output carry no animation (spec §7.4 byte-identical).
+// piped output carry no animation (byte-identical to the display).
 func (l *Layout) FormatLine(ln Line) string { return l.formatLine(ln, 0) }
 
 // FormatLiveLine renders the LIVE line: identical to FormatLine except the
@@ -200,7 +213,7 @@ func (l *Layout) formatLine(ln Line, frame rune) string {
 		// (state.go Step carries the unchanged status on non-transition
 		// events) and must fit the 5-cell STATE field. The word survives
 		// in prose contexts: the exit summary uses state.String
-		// directly (DECISIONS #68).
+		// directly.
 		status = "?"
 	}
 	dur := FormatDuration(ln.Duration)
@@ -264,8 +277,7 @@ func (l *Layout) FullWidth() int {
 	return l.fixedWidth() + l.hostWidth
 }
 
-// FormatDuration renders a duration as "Nd HH:MM:SS", capped at "99d+"
-// (spec §9.3, §9.4).
+// FormatDuration renders a duration as "Nd HH:MM:SS", capped at "99d+".
 func FormatDuration(d time.Duration) string {
 	if d >= durCap {
 		return "99d+"
@@ -281,7 +293,7 @@ func FormatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dd %02d:%02d:%02d", days, h, m, s)
 }
 
-// FormatRTT renders an RTT in milliseconds with two decimals (spec §10.2).
+// FormatRTT renders an RTT in milliseconds with two decimals.
 func FormatRTT(d time.Duration) string {
 	return fmt.Sprintf("%.2f", float64(d)/float64(time.Millisecond))
 }
@@ -296,7 +308,7 @@ func formatTime(t time.Time, format string) string {
 // truncateHost keeps the first w-1 cells of host plus an ellipsis so the
 // column stays exactly w cells wide. Cell-counted in runes: multibyte
 // hosts must not widen the field or corrupt the slice (byte-slicing could
-// cut mid-rune — DECISIONS #64).
+// cut mid-rune).
 func truncateHost(host string, w int) string {
 	r := []rune(host)
 	if len(r) <= w {
@@ -331,7 +343,7 @@ func cellWidth(s string) int {
 		if s[i] == '\x1b' {
 			if i+1 < len(s) && s[i+1] == '[' {
 				j := i + 2
-				for j < len(s) && !(s[j] >= 0x40 && s[j] <= 0x7e) {
+				for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
 					j++
 				}
 				if j < len(s) {

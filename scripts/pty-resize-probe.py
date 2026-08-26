@@ -5,21 +5,20 @@ Scenarios (argv[1]):
   window (default): spawns dohping --window in a 60x24 pty, resizes the pty
     to 100x24 mid-run (SIGWINCH + TIOCSWINSZ), renders the capture through
     a VT emulator and prints the visible screen — proves the block repaints
-    IN PLACE across the resize: with column trimming (DECISIONS #71) the
-    line never wraps at these widths, so the reflow cannot move it and
-    exactly ONE block remains on screen (no frozen duplicate).
+    IN PLACE across the resize: with column trimming the line never wraps
+    at these widths, so the reflow cannot move it and exactly ONE block
+    remains on screen (no frozen duplicate).
   window-subfloor: same setup but 50x24 → 40x24 mid-run — a width change
     INTO the below-floor wrap zone (the line fits one row at 50, wraps at
     40): the fresh frame itself wraps at the settled width, so the block
     FREEZES and restarts on a fresh row below the frozen rendering — the
-    reclaim's below-floor fallback (SPEC-window-resize-reclaim.md: two
-    blocks).
+    reclaim's below-floor fallback (two blocks).
   window-same-band: 60 → 55 mid-run — both widths keep the trimmed line in
-    one row; repaints in place, one block (DECISIONS #70).
+    one row; repaints in place, one block.
   plain: spawns PLAIN live mode in a fixed 60x24 pty (below the 81-cell
     minimum, so every line wraps) and asserts the live line stays anchored
-    across many redraws — the pre-#65 code walked it DOWN one row per
-    redraw, leaving stale fragments.
+    across many redraws — earlier code walked it down one row per redraw,
+    leaving stale fragments.
 
 Run against a FRESH build (rm -f the binary first — stale-build trap):
   python3 scripts/pty-resize-probe.py [window|plain]
@@ -114,9 +113,14 @@ class TermScreen:
         return "\n".join(f"{r:2}|{self.line(r)}" for r in range(self.rows))
 
 
-def capture(args, cols, rows, scr, resize_to=None, duration=7.0):
+def capture(args, cols, rows, scr, resize_to=None, duration=7.0, write_after=None):
     """Run dohping in a pty of the given size; optionally resize mid-run.
     scr is a TermScreen fed incrementally and renders the final state.
+    write_after: optional (delay, payload) — after `delay` seconds write
+    `payload` bytes to the pty master (e.g. b"q" for the interactive quit
+    path). The child is expected to exit on its own when it quits; the
+    trailing SIGTERM is harmless either way (a reaped/zombie child just
+    ignores it).
     Returns (raw_bytes, exit_code)."""
     pid, fd = pty.fork()
     if pid == 0:
@@ -128,6 +132,7 @@ def capture(args, cols, rows, scr, resize_to=None, duration=7.0):
     buf = b""
     t0 = time.time()
     resized = False
+    sent = False
     while True:
         r, _, _ = select.select([fd], [], [], 0.2)
         if r:
@@ -147,6 +152,9 @@ def capture(args, cols, rows, scr, resize_to=None, duration=7.0):
             set_winsize(fd, rows, resize_to)
             scr.resize(resize_to)
             resized = True
+        if write_after is not None and not sent and now > write_after[0]:
+            os.write(fd, write_after[1])
+            sent = True
         if now > duration:
             break
 
@@ -179,7 +187,7 @@ def main():
     if mode == "window-same-band":
         # 60 → 55 mid-run: same wrap band (12 physical rows at both
         # widths), so the block must repaint in place — exactly ONE header
-        # on the final screen, no frozen duplicate (DECISIONS #70).
+        # on the final screen, no frozen duplicate.
         scr = TermScreen(rows, 60)
         buf, code = capture(["--window"] + common, 60, rows, scr, resize_to=55)
         print("=== visible screen at final width (55 cols) ===")
@@ -197,6 +205,23 @@ def main():
         print(f"timestamp rows: {live}")
         print(f"restart CRLF sequences: {text.count(chr(13)+chr(10))}")
         print("RESULT: " + ("PASS — same-band resize repainted in place" if ok else "FAIL — block froze/duplicated"))
+        return
+
+    if mode == "quit":
+        # Interactive q-quit contract: run in a real pty (raw stdin enables
+        # the key reader), press q after a couple of probes, and assert the
+        # process exits 0 ON ITS OWN — the documented interactive quit
+        # (help.go: "pressing q quits cleanly with exit code 0"). This is
+        # the only path that exercises startKeyReader end-to-end.
+        scr = TermScreen(rows, 100)
+        buf, code = capture(["--no-window"] + common, 100, rows, scr,
+                            duration=8.0, write_after=(2.0, b"q"))
+        text = buf.decode("utf-8", "replace")
+        print("=== visible screen (plain live, q pressed at 2s) ===")
+        print(scr.dump())
+        print(f"=== exit status: {code} (want 0 — clean q-quit) ===")
+        ok = code == 0 and "summary" in text
+        print("RESULT: " + ("PASS — q quit cleanly with exit 0" if ok else "FAIL — expected clean q-quit (exit 0 + summary)"))
         return
 
     if mode == "plain":
@@ -219,7 +244,7 @@ def main():
         # (below the essentials floor) — the fresh frame itself wraps at
         # the settled width, so the block FREEZES then restarts below the
         # frozen rendering: the reclaim's below-floor fallback
-        # (SPEC-window-resize-reclaim.md; two blocks on screen).
+        # (two blocks on screen).
         scr = TermScreen(rows, 50)
         buf, code = capture(["--window"] + common, 50, rows, scr, resize_to=40)
         print("=== visible screen at final width (40 cols) ===")
@@ -234,7 +259,7 @@ def main():
         return
 
     # window mode: 60 → 100 mid-run. The line is trimmed to fit at 60
-    # (DECISIONS #71) and never wraps at either width, so the reflow cannot
+    # and never wraps at either width, so the reflow cannot
     # move the block: it must repaint IN PLACE — exactly ONE block on the
     # final screen (no frozen duplicate).
     scr = TermScreen(rows, 60)

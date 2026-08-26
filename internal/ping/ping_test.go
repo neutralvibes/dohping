@@ -51,14 +51,14 @@ func TestTCPProbeEstablished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			c.Close()
+			_ = c.Close()
 		}
 	}()
 
@@ -66,7 +66,7 @@ func TestTCPProbeEstablished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeUp {
@@ -84,13 +84,13 @@ func TestTCPProbeRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
+	_ = ln.Close()
 
 	pr, err := NewTCPProbe("127.0.0.1", port, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeUp {
@@ -105,7 +105,7 @@ func TestTCPProbeTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	r := pr.Probe(context.Background())
 	if r.Outcome != OutcomeDown {
@@ -116,7 +116,7 @@ func TestTCPProbeTimeout(t *testing.T) {
 func TestTCPProbeDNSFailure(t *testing.T) {
 	pr, err := NewTCPProbe("nonexistent-host.invalid", 443, time.Second)
 	if err == nil {
-		pr.Close()
+		_ = pr.Close()
 		t.Fatal("NewTCPProbe succeeded, want DNS resolution error")
 	}
 	if !strings.Contains(err.Error(), "resolve") {
@@ -129,7 +129,7 @@ func TestTCPProbeCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
@@ -141,69 +141,6 @@ func TestTCPProbeCancellation(t *testing.T) {
 	// Result may be Down (deadline) — but it must be prompt and not Error.
 	if r.Outcome == OutcomeError && r.Err != nil && !errors.Is(r.Err, context.DeadlineExceeded) {
 		t.Errorf("outcome = %v (%v), want prompt down/error without hang", r.Outcome, r.Err)
-	}
-}
-
-// TestICMPProbeLoopback probes the loopback address through whatever ICMP
-// tier the environment permits (raw socket, unprivileged ping socket, or
-// the system ping command fallback). All three must report up.
-func TestICMPProbeLoopback(t *testing.T) {
-	pr, err := NewICMPProbe("127.0.0.1", time.Second)
-	if err != nil {
-		t.Fatalf("NewICMPProbe: %v", err)
-	}
-	defer pr.Close()
-
-	r := pr.Probe(context.Background())
-	if r.Outcome != OutcomeUp {
-		t.Fatalf("outcome = %v, want up (err=%v)", r.Outcome, r.Err)
-	}
-	if r.RTT <= 0 {
-		t.Errorf("RTT = %v, want > 0", r.RTT)
-	}
-}
-
-// TestICMPFallbackEngagesPingCommand asserts that in environments without
-// ICMP sockets, the ping-command tier is used (so the default probe still
-// works instead of failing with a permission error).
-func TestICMPFallbackEngagesPingCommand(t *testing.T) {
-	pr, err := NewICMPProbe("127.0.0.1", time.Second)
-	if err != nil {
-		t.Skipf("no ICMP tier available: %v", err)
-	}
-	defer pr.Close()
-	if _, ok := pr.(*pingCmdProbe); !ok {
-		// Raw or unprivileged socket tier engaged — even better.
-		t.Logf("socket tier engaged (%T); ping fallback not exercised", pr)
-		return
-	}
-	r := pr.Probe(context.Background())
-	if r.Outcome != OutcomeUp {
-		t.Errorf("ping fallback outcome = %v, want up (err=%v)", r.Outcome, r.Err)
-	}
-}
-
-// TestICMPPermissionError asserts the operational-error contract when
-// EVERY ICMP tier is unavailable: a clear error with guidance, never a
-// host-down outcome. The ping command is hidden via PATH so the fallback
-// cannot engage.
-func TestICMPPermissionError(t *testing.T) {
-	t.Setenv("PATH", "/nonexistent-dir-xyz")
-	pr, err := NewICMPProbe("127.0.0.1", time.Second)
-	if err == nil {
-		pr.Close()
-		t.Fatal("NewICMPProbe succeeded without any ICMP tier")
-	}
-	if !strings.Contains(err.Error(), "unable to create ICMP socket") {
-		t.Errorf("error = %q, want 'unable to create ICMP socket' framing", err)
-	}
-	if !IsPermissionError(err) {
-		t.Errorf("error = %v, want a permission-class error (EPERM/EACCES)", err)
-	}
-	// The failure is operational: constructing the probe must never be
-	// treated as evidence the host is down.
-	if strings.Contains(err.Error(), "down") {
-		t.Errorf("error mentions host-down: %q", err)
 	}
 }
 

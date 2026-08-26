@@ -20,7 +20,7 @@ import (
 //   - non-live output (piped, --no-live) prints finalized lines only,
 //     never carriage returns or ANSI
 //
-// Live-line width awareness (DECISIONS #65): the live line is re-anchored
+// Live-line width awareness: the live line is re-anchored
 // on every redraw using the same physical-row primitive as the window
 // block, reduced to one row's bookkeeping. If the terminal is narrower
 // than the line it WRAPS, and without bookkeeping every redraw would
@@ -35,12 +35,12 @@ import (
 // The primitive engages only when live; piped/--no-live output is
 // byte-identical plain lines.
 //
-// RESIZE handling (DECISIONS #67): a reflowing terminal (Windows
+// RESIZE handling: a reflowing terminal (Windows
 // Terminal, Terminal.app, iTerm2) re-wraps existing lines on width
 // change, moving the live line under the relative bookkeeping — the
 // walk-back overshoots (creep) and the re-wrapped first half is never
-// overwritten. Querying the terminal for its cursor position (DSR/CPR,
-// DECISIONS #66) was abandoned: on Windows Terminal/WSL the answer comes
+// overwritten. Querying the terminal for its cursor position (DSR/CPR)
+// was abandoned: on Windows Terminal/WSL the answer comes
 // from ConPTY, whose reflow differs from the rendered view (microsoft/
 // terminal#18725), so the anchor was garbage. Instead the display never
 // reclaims a reflowed line: when the width changes it FREEZES in-place
@@ -128,7 +128,7 @@ func (d *Display) Handle(ev state.Event) {
 // display must still visibly move every second (user report 2026-08-17).
 // Duration is "how long has this status held" — wall-clock elapsed time,
 // which grows between probes; the event-based value is only a sample
-// (same math Finalize uses at shutdown, monotonic-safe per spec §20.4).
+// (same math Finalize uses at shutdown, monotonic-safe).
 // No-op when quiet, non-live, or no current line.
 func (d *Display) Tick() {
 	if d.quiet || !d.live || d.cur == nil {
@@ -172,16 +172,16 @@ func (d *Display) Finalize() {
 // plus clear-to-EOL to wipe any live residue, and must END with an explicit
 // CRLF — a bare LF moves down but does not reset the column, so whatever
 // prints next (the exit summary) would start mid-line and drift right
-// (DECISIONS #54 lesson, user report 2026-08-17). Defensive clearing
+// (a user report 2026-08-17). Defensive clearing
 // removes rows the previous live line used but this finalized line does
-// not (DECISIONS #65). The next live line starts fresh below, so the wrap
+// not. The next live line starts fresh below, so the wrap
 // bookkeeping resets. In non-live mode it is plain newline-terminated
-// output. A resize in flight forces the freeze/restart (DECISIONS #67):
+// output. A resize in flight forces the freeze/restart:
 // the finalized line must land below the frozen rendering, never reclaim
 // it — the old line stays frozen on screen as history.
 func (d *Display) printFinalized(s string) {
 	if !d.live {
-		fmt.Fprintln(d.w, s)
+		_, _ = fmt.Fprintln(d.w, s)
 		return
 	}
 	tw := d.termWidth()
@@ -191,8 +191,12 @@ func (d *Display) printFinalized(s string) {
 	d.resizeRestart() // force: finalize must land correctly even mid-episode
 	if forced {
 		debugx.Debugf("redraw", "plain finalize forces render (tw=%d)", tw)
+		// Only a resize-forced restart may mark the row above with '-'.
+		// On a plain status change the row above the live
+		// line is real history (the header, or a previous finalized line) —
+		// marking it would clobber it (user report 2026-08-23).
+		d.resizeMarkAbove(oldPhys, s, tw)
 	}
-	d.resizeMarkAbove(oldPhys, s, tw)
 	var sb strings.Builder
 	if d.lastPhysRows > 1 {
 		fmt.Fprintf(&sb, "\x1b[%dA\r", d.lastPhysRows-1)
@@ -207,31 +211,31 @@ func (d *Display) printFinalized(s string) {
 			// Reset to column 0 before clearing: cursor-down preserves the
 			// column, and the cursor sits at the END of the written line —
 			// ESC[K alone would only clear from there and leave the stale
-			// text at the row's start (DECISIONS #65).
+			// text at the row's start.
 			sb.WriteString("\x1b[1B\r\x1b[K")
 		}
 		fmt.Fprintf(&sb, "\x1b[%dA", d.lastPhysRows-phys)
 	}
 	sb.WriteString("\r\n")
 	d.lastPhysRows = 1 // next live line starts fresh below the finalized line
-	fmt.Fprint(d.w, sb.String())
+	_, _ = fmt.Fprint(d.w, sb.String())
 }
 
-// writeLive writes the live line in place with wrap bookkeeping (DECISIONS
-// #65): if the previous live line wrapped, walk back to its true start
+// writeLive writes the live line in place with wrap bookkeeping: if the
+// previous live line wrapped, walk back to its true start
 // before rewriting (the cursor sits on the wrapped tail row otherwise);
 // if this line uses fewer rows than the previous one (terminal grew back),
 // clear the rows no longer used. Terminal width is re-read on EVERY write,
 // so a resize is picked up by probe events, the 1-second tick, and the
 // SIGWINCH fast path alike.
 //
-// RESIZE (DECISIONS #67): when the width changes, in-place writes are
+// RESIZE: when the width changes, in-place writes are
 // FROZEN until the terminal has settled (resizeSettleDelay with no further
 // width change) — during a reflow the old line's position is unknowable,
 // so any write is a gamble. Once settled, the display moves to a fresh
 // row below the frozen rendering and resumes there; the frozen line
 // remains in scrollback as history. This replaces the CPR re-anchor
-// (#66), which failed on Windows Terminal/WSL (ConPTY reports unreliable
+// approach, which failed on Windows Terminal/WSL (ConPTY reports unreliable
 // positions — microsoft/terminal#18725).
 func (d *Display) writeLive(s string) {
 	tw := d.termWidth()
@@ -260,21 +264,21 @@ func (d *Display) writeLive(s string) {
 			// Reset to column 0 before clearing: cursor-down preserves the
 			// column, and the cursor sits at the END of the written line —
 			// ESC[K alone would only clear from there and leave the stale
-			// text at the row's start (DECISIONS #65).
+			// text at the row's start.
 			sb.WriteString("\x1b[1B\r\x1b[K")
 		}
 		fmt.Fprintf(&sb, "\x1b[%dA", d.lastPhysRows-phys)
 	}
 	d.lastPhysRows = phys
-	fmt.Fprint(d.w, sb.String())
+	_, _ = fmt.Fprint(d.w, sb.String())
 }
 
 // resizeSettleDelay is how long the width must stay stable after a change
-// before the displays restart on a fresh row (DECISIONS #67). Covers a
+// before the displays restart on a fresh row. Covers a
 // resize drag, which fires many width changes in quick succession.
 const resizeSettleDelay = 300 * time.Millisecond
 
-// resizeNote records a width change (DECISIONS #67): the first observation
+// resizeNote records a width change: the first observation
 // just calibrates lastWidth; a real change marks the display frozen
 // (resizePending) until the width has been stable for resizeSettleDelay.
 // No-op when the width is unknown (≤ 0).
@@ -298,19 +302,19 @@ func (d *Display) resizeNote(tw int) {
 // resizeRestart moves the display below the frozen (re-wrapped) rendering
 // and resets the wrap bookkeeping to the fresh row. No-op unless a resize
 // is pending. Called when the width has settled (writeLive) or when a
-// write must land correctly right now (finalize paths — DECISIONS #67).
+// write must land correctly right now (finalize paths).
 func (d *Display) resizeRestart() {
 	if !d.resizePending {
 		return
 	}
 	d.resizePending = false
-	fmt.Fprint(d.w, "\r\n")
+	_, _ = fmt.Fprint(d.w, "\r\n")
 	d.lastPhysRows = 1
 }
 
 // resizeMarkAbove marks the frozen row directly above the fresh rendering
-// as a resize artifact (a single '-') when it is provably a single row
-// (DECISIONS #68): if the previous live line occupied exactly one
+// as a resize artifact (a single '-') when it is provably a single row:
+// if the previous live line occupied exactly one
 // physical row AND the fresh line also fits in one row at the new width,
 // the frozen (re-wrapped) line is exactly the row above — on reflowing
 // and non-reflowing terminals alike — so its TIME is replaced with a
@@ -322,7 +326,7 @@ func (d *Display) resizeMarkAbove(oldPhys int, s string, tw int) {
 	if oldPhys != 1 || physicalRows(cellWidth(s), tw) != 1 {
 		return
 	}
-	fmt.Fprint(d.w, "\x1b[1A\r-\x1b[K\x1b[1B\r")
+	_, _ = fmt.Fprint(d.w, "\x1b[1A\r-\x1b[K\x1b[1B\r")
 }
 
 // termWidth returns the terminal width in cells (0 = unknown → no wrap).
@@ -337,5 +341,5 @@ func (d *Display) termWidth() int {
 // printLine writes a plain (non-live) line: the header, or finalized
 // lines in non-live mode.
 func (d *Display) printLine(s string) {
-	fmt.Fprintln(d.w, s)
+	_, _ = fmt.Fprintln(d.w, s)
 }

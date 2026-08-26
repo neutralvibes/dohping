@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"dohping/internal/debugx"
 	"dohping/internal/state"
 )
 
@@ -21,12 +20,12 @@ func successEvent(t time.Time, st state.Status, stats state.Stats, fails int) st
 }
 
 func newTestDisplay(w *bytes.Buffer, quiet, noHeader, live bool) *Display {
-	// Width 0 = unknown (never wrap) — the pre-#65 behavior.
+	// Width 0 = unknown (never wrap) — the pre-fix behavior.
 	return newTestDisplaySized(w, quiet, noHeader, live, 0, 0)
 }
 
 // newTestDisplaySized injects a terminal size; width drives the live
-// line's wrap bookkeeping (DECISIONS #65).
+// line's wrap bookkeeping.
 func newTestDisplaySized(w *bytes.Buffer, quiet, noHeader, live bool, width, height int) *Display {
 	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height })
 	d.SetNow(func() time.Time { return t0.Add(time.Minute) })
@@ -35,8 +34,7 @@ func newTestDisplaySized(w *bytes.Buffer, quiet, noHeader, live bool, width, hei
 
 // newTestDisplayResizable injects a MUTABLE terminal size AND clock:
 // tests simulate a resize by changing the captured variables between
-// redraws, and advance the clock to settle the resize freeze (DECISIONS
-// #67).
+// redraws, and advance the clock to settle the resize freeze.
 func newTestDisplayResizable(w *bytes.Buffer, quiet, noHeader, live bool, width, height int) (*Display, *int, *int, *time.Time) {
 	now := t0.Add(time.Minute)
 	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height })
@@ -259,7 +257,7 @@ func errBoom() error { return errors.New("boom") }
 // plain static line, and non-live output contains no frame glyphs at all
 // (user request 2026-08-17). The visible screen is asserted through the
 // terminal emulator — the raw stream contains every live redraw, so
-// byte-level glyph checks would be wrong (DECISIONS #54 lesson).
+// byte-level glyph checks would be wrong.
 func TestLiveLineShowsAnimationFrame(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, false, false, true) // live
@@ -372,7 +370,7 @@ func TestNonLiveNoAnimation(t *testing.T) {
 }
 
 // TestDisplayLiveLineStaysAnchoredWhenWrapped is the regression test for
-// the reported plain-mode bug (DECISIONS #65): at a width below the
+// the reported plain-mode bug: at a width below the
 // minimum the live line wraps, and the pre-fix code wrote every redraw at
 // the cursor's CURRENT row (the end of the wrapped tail), so the line
 // walked DOWN one row per redraw, leaving stale fragments at every
@@ -412,8 +410,8 @@ func TestDisplayLiveLineStaysAnchoredWhenWrapped(t *testing.T) {
 }
 
 // TestDisplayLiveLineGrowBackKeepsFrozenLine: growing the terminal back
-// after a wrapped live line must NOT reclaim the old rendering (DECISIONS
-// #67): the wrapped line freezes in place as history, and after the width
+// after a wrapped live line must NOT reclaim the old rendering:
+// the wrapped line freezes in place as history, and after the width
 // settles the display restarts on a fresh row below it. Everything below
 // the fresh line must be clean.
 func TestDisplayLiveLineGrowBackKeepsFrozenLine(t *testing.T) {
@@ -465,7 +463,7 @@ func TestDisplayLiveLineGrowBackKeepsFrozenLine(t *testing.T) {
 // TestDisplayResizeFreezeThenRestart: on a width change the live line is
 // FROZEN (no in-place writes) until the width has been stable for
 // resizeSettleDelay, then the display restarts on a fresh row below the
-// frozen rendering (DECISIONS #67). This is the acceptance contract for
+// frozen rendering. This is the acceptance contract for
 // reflowing terminals — no CPR, no reclaim of the re-wrapped line.
 func TestDisplayResizeFreezeThenRestart(t *testing.T) {
 	var buf bytes.Buffer
@@ -516,7 +514,7 @@ func TestDisplayResizeFreezeThenRestart(t *testing.T) {
 // TestDisplayResizeSettleMarksFrozenRow: when the frozen line is provably
 // a single row (the live line was one row before AND after the resize),
 // the settle marks it with '-' so the scrollback shows a resize artifact
-// instead of a duplicate-looking data row (DECISIONS #68). The geometry
+// instead of a duplicate-looking data row. The geometry
 // is safe on reflowing and non-reflowing terminals alike: a line that
 // fits at both widths cannot re-wrap, so the frozen row is exactly the
 // one directly above the fresh line.
@@ -567,7 +565,7 @@ func TestDisplayResizeSettleMarksFrozenRow(t *testing.T) {
 // changes in quick succession; each one must RESTART the settle clock, so
 // the display stays frozen while the width keeps moving and restarts
 // exactly once, only after the width has been stable for resizeSettleDelay
-// (user-requested acceptance check, DECISIONS #67).
+// (user-requested acceptance check).
 func TestDisplayResizeDragKeepsFreezing(t *testing.T) {
 	var buf bytes.Buffer
 	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 60, 24)
@@ -615,8 +613,7 @@ func TestDisplayResizeDragKeepsFreezing(t *testing.T) {
 
 // TestDisplayFinalizeDuringResize: a status change while the width is
 // settling must still finalize correctly — the finalized line lands on a
-// fresh row below the frozen rendering, never reclaimed mid-reflow
-// (DECISIONS #67).
+// fresh row below the frozen rendering, never reclaimed mid-reflow.
 func TestDisplayFinalizeDuringResize(t *testing.T) {
 	var buf bytes.Buffer
 	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 60, 24)
@@ -655,6 +652,75 @@ func TestDisplayFinalizeDuringResize(t *testing.T) {
 		if got := scr.line(r); got != "" {
 			t.Errorf("row %d not blank: %q", r, got)
 		}
+	}
+}
+
+// TestDisplayStatusChangeKeepsHistory: a PLAIN status change (no resize)
+// must finalize the live line WITHOUT marking the row above with '-'.
+// The row above the live line on a status change is real history — the
+// header, or a previous finalized line — and resizeMarkAbove
+// clobbers it with '-', losing the header and flattening the
+// scrollback (user report 2026-08-23: "prints a blank line with '-',
+// losing the header. It also only shows 2 lines at a time"). The mark is
+// only legal when a resize actually forced the restart (writeLive already
+// gates it); printFinalized must too.
+func TestDisplayStatusChangeKeepsHistory(t *testing.T) {
+	var buf bytes.Buffer
+	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 100, 24)
+	*wPtr = 100
+	d.Handle(changeEvent(t0, state.StatusUp))
+	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
+		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
+	frame1 := buf.String()
+
+	// Flip to down: the up line finalizes. No width change happened, so
+	// the row above (the header) must survive untouched.
+	*now = now.Add(30 * time.Second)
+	downEv := state.Event{
+		Kind: state.EventStatusChange, Time: t0.Add(30 * time.Second),
+		Status: state.StatusDown, PrevStatus: state.StatusUp,
+		Duration: 30 * time.Second, Fails: 1,
+		PrevStats: buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1),
+	}
+	buf.Reset()
+	d.Handle(downEv)
+	finalDown := buf.String()
+	if strings.Contains(finalDown, "\x1b[1A\r-") {
+		t.Errorf("status-change finalize marks the row above with '-': %q", finalDown)
+	}
+
+	// Flip back up: the down line finalizes; the up line above must stay.
+	*now = now.Add(60 * time.Second)
+	upEv := state.Event{
+		Kind: state.EventStatusChange, Time: t0.Add(60 * time.Second),
+		Status: state.StatusUp, PrevStatus: state.StatusDown,
+		Duration: 30 * time.Second, Fails: 0,
+		PrevStats: state.Stats{Count: 0},
+	}
+	buf.Reset()
+	d.Handle(upEv)
+	finalUp := buf.String()
+	if strings.Contains(finalUp, "\x1b[1A\r-") {
+		t.Errorf("second status-change finalize marks the row above with '-': %q", finalUp)
+	}
+
+	// Render the whole session through the emulator: header at row 0,
+	// then one finalized line per status period, live line at the end.
+	scr := newTermScreen(24, 100)
+	scr.feed(frame1)
+	scr.feed(finalDown)
+	scr.feed(finalUp)
+	if got := scr.line(0); !strings.HasPrefix(got, "TIME") {
+		t.Errorf("row 0 = %q, want the header (TIME...)", got)
+	}
+	if got := scr.line(1); !strings.HasPrefix(got, "11:00:35") {
+		t.Errorf("row 1 = %q, want the finalized up line (11:00:35...)", got)
+	}
+	if got := scr.line(2); !strings.HasPrefix(got, "11:01:05") {
+		t.Errorf("row 2 = %q, want the finalized down line (11:01:05...)", got)
+	}
+	if got := scr.line(3); !strings.HasPrefix(got, "11:01:35") {
+		t.Errorf("row 3 = %q, want the new live up line (11:01:35...)", got)
 	}
 }
 
@@ -699,7 +765,7 @@ func TestDisplayFinalizeAfterWrappedLiveLineStartsClean(t *testing.T) {
 
 // TestDisplayNonLiveStaysEscapeFree: the wrap primitive must NEVER engage
 // for piped/--no-live output — even at a width that would wrap, the output
-// stays plain newline-terminated lines (the script contract, spec §2.5).
+// stays plain newline-terminated lines.
 func TestDisplayNonLiveStaysEscapeFree(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplaySized(&buf, false, false, false, 60, 24)
@@ -712,33 +778,5 @@ func TestDisplayNonLiveStaysEscapeFree(t *testing.T) {
 }
 
 // TestDisplayResizeDebugForensics: the plain display's resize observation
-// logs through the debug facility (DECISIONS #74) — the width change and
-// the settle restart — so a resize episode in plain mode is fully
-// reconstructable from the app's own log, the same way window mode is.
-func TestDisplayResizeDebugForensics(t *testing.T) {
-	var dbg strings.Builder
-	debugx.SetWriter(&dbg)
-	defer debugx.SetWriter(nil)
-
-	var buf bytes.Buffer
-	d, wPtr, _, now := newTestDisplayResizable(&buf, false, false, true, 60, 24)
-	*wPtr = 60
-	d.Handle(changeEvent(t0, state.StatusUp))
-	d.Handle(successEvent(t0.Add(2*time.Second), state.StatusUp,
-		buildStats(time.Millisecond, time.Millisecond, time.Millisecond, 1), 0))
-	dbg.Reset()
-
-	*wPtr = 55
-	*now = now.Add(100 * time.Millisecond) // mid-reflow: nothing written
-	d.Tick()
-	*now = now.Add(time.Second) // width stable: fresh row below the frozen line
-	d.Tick()
-
-	log := dbg.String()
-	if !strings.Contains(log, "plain 60→55") || !strings.Contains(log, "freeze") {
-		t.Errorf("plain resize change not logged: %q", log)
-	}
-	if !strings.Contains(log, "settled") {
-		t.Errorf("plain settle restart not logged: %q", log)
-	}
-}
+// (The display-resize debug-forensics test moved to forensics_debug_test.go
+// — it asserts on debugx output and lives under -tags debug.)

@@ -8,7 +8,7 @@ import (
 // WriteHelp prints the full help text. It is also the usage text shown
 // after usage errors (the caller prints the error line first).
 func WriteHelp(w io.Writer) {
-	fmt.Fprint(w, `dohping — a better interactive ping
+	_, _ = fmt.Fprint(w, `dohping — a better interactive ping
 
 Usage:
   dohping [options] HOST
@@ -37,7 +37,7 @@ Options:
 Display:
   -q, --quiet                Suppress display output (logging still works)
       --no-header            Do not print the column header
-      --no-color             Disable color output
+  -n, --no-color             Disable color output
       --color MODE           Color mode: auto, always, never (default auto)
       --live MODE            Live updates: auto, on, off (default auto)
       --no-live              Disable live updating
@@ -48,10 +48,11 @@ Display:
                              Implies --window. (default 10)
       --timestamp-format F   Display timestamp format: HH:MM:SS | rfc3339
                              (default HH:MM:SS)
+      --bell                 Sound the terminal bell on a status change
 
 Logging:
   -l, --log-file PATH        Append finalized status events to PATH
-      --log-format FORMAT    Log format: text | json (default text)
+      --log-format FORMAT    Log format: csv | json (default csv)
 
 Exit codes:
   0    normal completion (--count exhausted or interactive q quit)

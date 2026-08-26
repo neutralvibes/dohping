@@ -1,4 +1,4 @@
-// Package logx writes the durable status-event log (spec §14): append-only,
+// Package logx writes the durable status-event log: append-only,
 // never colors or cursor control, RFC 3339 timestamps, IPv6 hosts
 // bracketed, independent of quiet mode.
 package logx
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,7 +33,7 @@ type Logger struct {
 }
 
 // Open opens (creating if needed, always appending) the log file.
-// Format is "text" or "json". A non-nil error means the file could not be
+// Format is "csv" or "json". A non-nil error means the file could not be
 // used — callers must fail cleanly, never silently drop logs.
 func Open(path, format, host string) (*Logger, error) {
 	// The path is the operator's own --log-file argument (a CLI, not a
@@ -71,24 +72,27 @@ func (l *Logger) Close() error {
 	return err
 }
 
-// textLine renders the text format (spec §14.4). Fields are omitted when
-// not applicable; fails is always present for up/down (0 for up).
+// textLine renders the CSV format: one event per line,
+// comma-separated columns, address before state, duration in raw seconds,
+// and unavailable fields left as empty cells (machine-readable — a CSV
+// parser reads them as "not applicable", same semantics as JSON's
+// omitempty). RTT fields are present only when up; fails only when down.
 func (l *Logger) textLine(e Entry) string {
 	ts := e.Time.Format(time.RFC3339)
-	base := fmt.Sprintf("%s host=%s status=%s duration_seconds=%d",
-		ts, l.host, e.Status.String(), int64(e.Duration.Seconds()))
+	f := func(ms float64) string { return strconv.FormatFloat(ms, 'f', 2, 64) }
+	base := []string{ts, l.host, e.Status.String(), strconv.FormatInt(int64(e.Duration.Seconds()), 10)}
 	switch e.Status {
 	case state.StatusUp:
-		return fmt.Sprintf("%s min_ms=%.2f max_ms=%.2f avg_ms=%.2f fails=%d\n",
-			base, ms(e.Stats.Min), ms(e.Stats.Max), ms(e.Stats.Avg()), e.Fails)
+		base = append(base, f(ms(e.Stats.Min)), f(ms(e.Stats.Max)), f(ms(e.Stats.Avg())), strconv.Itoa(e.Fails))
 	case state.StatusDown:
-		return fmt.Sprintf("%s fails=%d\n", base, e.Fails)
+		base = append(base, "", "", "", strconv.Itoa(e.Fails))
 	default: // unknown / error: no RTT, no fails
-		return base + "\n"
+		base = append(base, "", "", "", "")
 	}
+	return strings.Join(base, ",") + "\n"
 }
 
-// jsonLine renders the JSON format (spec §14.5): one object per line,
+// jsonLine renders the JSON format: one object per line,
 // RTT fields omitted for down/error, fails omitted for error.
 func (l *Logger) jsonLine(e Entry) string {
 	je := jsonEntry{
@@ -97,12 +101,13 @@ func (l *Logger) jsonLine(e Entry) string {
 		Status:          e.Status.String(),
 		DurationSeconds: int64(e.Duration.Seconds()),
 	}
-	if e.Status == state.StatusUp {
+	switch e.Status {
+	case state.StatusUp:
 		m, x, a := ms2(e.Stats.Min), ms2(e.Stats.Max), ms2(e.Stats.Avg())
 		je.MinMS, je.MaxMS, je.AvgMS = &m, &x, &a
 		f := e.Fails
 		je.Fails = &f
-	} else if e.Status == state.StatusDown {
+	case state.StatusDown:
 		f := e.Fails
 		je.Fails = &f
 	}
@@ -126,7 +131,7 @@ type jsonEntry struct {
 }
 
 // bracketIPv6 wraps bare IPv6 literals in brackets so host values are
-// unambiguous in logs (spec §14.6). Already-bracketed or non-IPv6 values
+// unambiguous in logs. Already-bracketed or non-IPv6 values
 // pass through.
 func bracketIPv6(host string) string {
 	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
@@ -139,7 +144,7 @@ func ms(d time.Duration) float64 {
 	return float64(d) / float64(time.Millisecond)
 }
 
-// ms2 rounds an RTT to two decimals for JSON output (spec §14.5 shows
+// ms2 rounds an RTT to two decimals for JSON output (the JSON log shows
 // 2-decimal values like "min_ms":1.70).
 func ms2(d time.Duration) float64 {
 	return math.Round(ms(d)*100) / 100

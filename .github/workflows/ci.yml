@@ -1,17 +1,26 @@
 # CI for dohping — one definition of green.
 #
-# gate (linux): gofmt, vet, race tests, gosec, real-PTY probe scenarios
-#   (TCP mode — no ICMP caps on runners), release matrix + SHA256SUMS.
+# The gate is scripts/check.sh (single source of truth): the same gate the
+# developer runs locally — gofmt, vet, race tests, and the analyzers
+# (golangci-lint, staticcheck, gosec, govulncheck), each SKIP-not-FAIL when
+# absent. CI pre-installs every tool so nothing is skipped on the runner.
+# The steps below the gate (fresh build, debug-compiled-out, PTY probe,
+# release matrix) are extra CI-only verification, NOT part of the green
+# definition — they must not be confused with the gate itself.
+#
+# gate (linux): scripts/check.sh + real-PTY probe scenarios (TCP mode — no
+#   ICMP caps on runners), release matrix + SHA256SUMS.
 # gate-windows: unit tests + vet only (probe is POSIX; the emulator-grid
 #   unit tests cover the platform matrix).
 #
-# gosec is installed from the prebuilt release tarball — NEVER
-# `go install gosec@latest` (compiles the LLM-SDK deps; DECISIONS #63).
+# gosec is installed from the prebuilt release tarball — never from
+# `go install` (its LLM-scan feature pulls heavy SDK dependencies).
 name: ci
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -33,17 +42,79 @@ jobs:
           mv gosec /usr/local/bin/
           gosec -version
 
-      - name: Quality gate (gofmt, vet, race, gosec)
-        run: bash scripts/check.sh
+      - name: Install golangci-lint (prebuilt tarball)
+        run: |
+          # Verify the tarball against the published checksums before
+          # extracting — the installer's own verify can race the release
+          # asset/checksum mirrors and fail spuriously.
+          GL_VER=v2.13.1
+          GL_FILE=golangci-lint-${GL_VER#v}-linux-amd64.tar.gz
+          curl -sSfL -o "$GL_FILE" https://github.com/golangci/golangci-lint/releases/download/$GL_VER/$GL_FILE
+          curl -sSfL -o gl-checksums.txt https://github.com/golangci/golangci-lint/releases/download/$GL_VER/golangci-lint-${GL_VER#v}-checksums.txt
+          grep " $GL_FILE\$" gl-checksums.txt | sha256sum -c --ignore-missing -
+          tar xzf "$GL_FILE"
+          mv golangci-lint-${GL_VER#v}-linux-amd64/golangci-lint /usr/local/bin/
+          golangci-lint --version
+
+      - name: Install staticcheck (standalone, authoritative)
+        run: |
+          curl -sSfL -o staticcheck.tar.gz https://github.com/dominikh/go-tools/releases/download/2026.2/staticcheck_linux_amd64.tar.gz
+          tar xzf staticcheck.tar.gz
+          mv staticcheck/staticcheck /usr/local/bin/
+          staticcheck -version
+
+      - name: Install govulncheck (supply-chain, pinned)
+        run: |
+          # govulncheck has no prebuilt release binaries (the golang/vuln
+          # releases carry no assets), so the documented install is
+          # `go install` of the cmd package. Pinned to the same version the
+          # local gate uses (v1.7.0) so CI == dev.
+          GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck -version
+
+      - name: Quality gate (single source of truth, scripts/check.sh)
+        run: |
+          # One definition of green, everywhere. check.sh is the SAME gate the
+          # developer runs locally — run with --ci so a missing optional tool
+          # is a FAIL (the install steps above provision every analyzer, so a
+          # SKIP here would mean the release path silently lost a check).
+          bash scripts/check.sh --ci
+
+      - name: Release gate (version/changelog/tag consistency)
+        run: |
+          # Enforced release checklist: version.go must be semver, the
+          # CHANGELOG must carry the version, and when this tree is at a
+          # version tag the constant and tag must agree. This is what would
+          # have caught the v0.1.2 drift (tag v0.1.2, version.go 0.1.1) in
+          # CI instead of at the release draft. Not at a tag -> version +
+          # changelog checks still run.
+          bash scripts/release-gate.sh
 
       - name: Fresh build (stale-build trap)
         run: |
           rm -f /tmp/dohping-test
           go build -o /tmp/dohping-test ./cmd/dohping
 
+      - name: Debug facility is compiled OUT of release builds
+        run: |
+          # Release build (no -tags debug): DOHPING_DEBUG must be inert —
+          # no file created, no warning, exit unaffected. If the stub
+          # leaks or a future refactor ships the real debugx, this fails.
+          rm -f /tmp/dohping-debug-probe.log
+          DOHPING_DEBUG=/tmp/dohping-debug-probe.log /tmp/dohping-test --version >/dev/null 2>/tmp/dohping-debug-probe.err || { cat /tmp/dohping-debug-probe.err; exit 1; }
+          if [ -e /tmp/dohping-debug-probe.log ]; then
+            echo "FAIL: release build wrote a debug log (debug facility leaked in)" >&2
+            exit 1
+          fi
+          if grep -q "debug" /tmp/dohping-debug-probe.err 2>/dev/null; then
+            echo "FAIL: release build printed a debug warning (facility leaked in)" >&2
+            exit 1
+          fi
+          echo "PASS: release build has no debug facility"
+
       - name: Real-PTY probe scenarios
         run: |
-          for s in window window-same-band window-subfloor plain; do
+          for s in window window-same-band window-subfloor plain quit; do
             python3 scripts/pty-resize-probe.py "$s"
           done
 
@@ -72,3 +143,33 @@ jobs:
 
       - name: go test (unit only — probe is POSIX, race not run on Windows)
         run: go test ./...
+
+  # Release: on a version tag, run the full gate, build the matrix, and
+  # attach the binaries + checksums to the tag's GitHub Release. The
+  # release artifact is CI-built, so it is the same tree that just passed
+  # the gate on a clean runner — never a locally-built binary.
+  release:
+    name: Release
+    needs: [gate, gate-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Release matrix + checksums
+        run: bash scripts/release.sh
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          draft: true

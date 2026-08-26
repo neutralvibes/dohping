@@ -7,7 +7,12 @@ import "runtime/debug"
 // build time:
 //
 //	go build -ldflags "-X dohping/internal/version.Version=v1.2.3"
-var Version = "0.1.0"
+//
+// The release constant MUST match the next release tag — scripts/release.sh
+// refuses to build a release when this and the tag disagree (a drift here
+// silently produced a mislabeled v0.1.2 draft on 2026-08-26; the guard is
+// the fix).
+var Version = "0.1.3"
 
 // Commit is the VCS revision at build time (short form). Overridable via
 // ldflags; falls back to module build info when empty.

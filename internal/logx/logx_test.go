@@ -35,18 +35,18 @@ func downEntry() Entry {
 
 func TestOpenCreatesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dohping.log")
-	l, err := Open(path, "text", "192.168.1.23")
+	l, err := Open(path, "csv", "192.168.1.23")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("log file not created: %v", err)
 	}
 }
 
 func TestOpenFailsCleanly(t *testing.T) {
-	_, err := Open("/nonexistent-dir-xyz/file.log", "text", "h")
+	_, err := Open("/nonexistent-dir-xyz/file.log", "csv", "h")
 	if err == nil {
 		t.Fatal("Open succeeded for bad path, want error")
 	}
@@ -54,43 +54,82 @@ func TestOpenFailsCleanly(t *testing.T) {
 
 func TestAppendNotTruncate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dohping.log")
-	l, _ := Open(path, "text", "192.168.1.23")
+	l, _ := Open(path, "csv", "192.168.1.23")
 	if err := l.Log(upEntry()); err != nil {
 		t.Fatal(err)
 	}
-	l.Close()
+	_ = l.Close()
 
-	l2, _ := Open(path, "text", "192.168.1.23")
-	defer l2.Close()
+	l2, _ := Open(path, "csv", "192.168.1.23")
+	defer func() { _ = l2.Close() }()
 	if err := l2.Log(downEntry()); err != nil {
 		t.Fatal(err)
 	}
-	l2.Close()
+	_ = l2.Close()
 
 	data, _ := os.ReadFile(path)
-	if strings.Count(string(data), "status=") != 2 {
+	if strings.Count(string(data), ",192.168.1.23,") != 2 {
 		t.Errorf("append lost entries: %q", data)
 	}
-	if !strings.Contains(string(data), "status=up") || !strings.Contains(string(data), "status=down") {
+	if !strings.Contains(string(data), ",up,") || !strings.Contains(string(data), ",down,") {
 		t.Errorf("entries missing: %q", data)
 	}
 }
 
 func TestTextFormatUp(t *testing.T) {
-	l := &Logger{format: "text", host: "192.168.1.23"}
+	l := &Logger{format: "csv", host: "192.168.1.23"}
 	got := l.textLine(upEntry())
-	want := "2026-08-16T11:00:35+01:00 host=192.168.1.23 status=up duration_seconds=2126 min_ms=1.70 max_ms=5.90 avg_ms=2.70 fails=0\n"
+	want := "2026-08-16T11:00:35+01:00,192.168.1.23,up,2126,1.70,5.90,2.70,0\n"
 	if got != want {
-		t.Errorf("text up mismatch:\n got: %q\nwant: %q", got, want)
+		t.Errorf("csv up mismatch:\n got: %q\nwant: %q", got, want)
 	}
 }
 
 func TestTextFormatDown(t *testing.T) {
-	l := &Logger{format: "text", host: "192.168.1.23"}
+	l := &Logger{format: "csv", host: "192.168.1.23"}
 	got := l.textLine(downEntry())
-	want := "2026-08-16T11:01:40+01:00 host=192.168.1.23 status=down duration_seconds=65 fails=23\n"
+	want := "2026-08-16T11:01:40+01:00,192.168.1.23,down,65,,,,23\n"
 	if got != want {
-		t.Errorf("text down mismatch:\n got: %q\nwant: %q", got, want)
+		t.Errorf("csv down mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestTextFormatError(t *testing.T) {
+	l := &Logger{format: "csv", host: "192.168.1.23"}
+	e := Entry{Time: t0(), Host: "192.168.1.23", Status: state.StatusError, Duration: 3 * time.Second}
+	got := l.textLine(e)
+	want := "2026-08-16T11:00:35+01:00,192.168.1.23,error,3,,,,\n"
+	if got != want {
+		t.Errorf("csv error mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestCSVParseable verifies the CSV text format is genuinely machine-readable:
+// every produced line parses back into exactly 8 fields, and the unavailable
+// cells on a down line come back as empty strings.
+func TestCSVParseable(t *testing.T) {
+	l := &Logger{format: "csv", host: "192.168.1.23"}
+	for _, e := range []Entry{upEntry(), downEntry(), {Time: t0(), Host: "192.168.1.23", Status: state.StatusError, Duration: 3 * time.Second}} {
+		line := strings.TrimSuffix(l.textLine(e), "\n")
+		fields := strings.Split(line, ",")
+		if len(fields) != 8 {
+			t.Errorf("csv line has %d fields, want 8: %q", len(fields), line)
+		}
+		if fields[1] != "192.168.1.23" || fields[0] == "" {
+			t.Errorf("csv address/timestamp wrong: %q", line)
+		}
+	}
+	// Down line: RTT cells empty, fails populated.
+	down := strings.TrimSuffix(l.textLine(downEntry()), "\n")
+	f := strings.Split(down, ",")
+	if f[3] != "65" || f[4] != "" || f[5] != "" || f[6] != "" || f[7] != "23" {
+		t.Errorf("down csv cells wrong: %q", down)
+	}
+	// Up line: RTT + fails populated.
+	up := strings.TrimSuffix(l.textLine(upEntry()), "\n")
+	f = strings.Split(up, ",")
+	if f[4] != "1.70" || f[5] != "5.90" || f[6] != "2.70" || f[7] != "0" {
+		t.Errorf("up csv cells wrong: %q", up)
 	}
 }
 
@@ -107,7 +146,7 @@ func TestJSONFormatParseable(t *testing.T) {
 	if m["min_ms"] != 1.7 || m["max_ms"] != 5.9 || m["avg_ms"] != 2.7 {
 		t.Errorf("json rtt fields wrong: %v", m)
 	}
-	// Two-decimal rounding (spec §14.5).
+	// Two-decimal rounding.
 	sub := Entry{Time: t0(), Host: "h", Status: state.StatusUp, Duration: time.Second,
 		Stats: state.Stats{Count: 1, Min: 199399 * time.Nanosecond, Max: 199399 * time.Nanosecond, Sum: 199399 * time.Nanosecond}}
 	got = strings.TrimSpace(l.jsonLine(sub))
@@ -141,11 +180,11 @@ func TestJSONFormatParseable(t *testing.T) {
 
 func TestNoANSIInLog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dohping.log")
-	l, err := Open(path, "text", "h")
+	l, err := Open(path, "csv", "h")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	if err := l.Log(upEntry()); err != nil {
 		t.Fatal(err)
 	}
@@ -167,10 +206,10 @@ func TestNoANSIInLog(t *testing.T) {
 }
 
 func TestIPv6Bracketing(t *testing.T) {
-	l := &Logger{format: "text", host: bracketIPv6("::1")}
+	l := &Logger{format: "csv", host: bracketIPv6("::1")}
 	got := l.textLine(Entry{Time: t0(), Host: "::1", Status: state.StatusUp, Duration: time.Second})
-	if !strings.Contains(got, "host=[::1]") {
-		t.Errorf("IPv6 not bracketed: %q", got)
+	if !strings.Contains(got, ",up,") || !strings.Contains(got, "::1") {
+		t.Errorf("IPv6 not written as address: %q", got)
 	}
 	// Already bracketed passes through.
 	if got := bracketIPv6("[::1]"); got != "[::1]" {
@@ -187,7 +226,7 @@ func TestIPv6Bracketing(t *testing.T) {
 
 func TestCloseFlushes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dohping.log")
-	l, _ := Open(path, "text", "h")
+	l, _ := Open(path, "csv", "h")
 	if err := l.Log(upEntry()); err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +234,7 @@ func TestCloseFlushes(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	if !strings.Contains(string(data), "status=up") {
+	if !strings.Contains(string(data), ",up,") {
 		t.Errorf("entry not durable after Close: %q", data)
 	}
 }
