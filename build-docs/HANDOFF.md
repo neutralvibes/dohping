@@ -114,16 +114,32 @@ work. README restructured, CHANGELOG finalized, Windows resolves as ship.
    Linux-runnable the whole time and took a user prompt to check (DECISIONS
    #92). Only cross-compiled darwin/windows binaries need the user. "Tests
    for everything" is the standing standard.
+9. Checklists are ENFORCED or they are decoration. The release checklist
+   (PUBLISH-CHECKLIST.md) existed as markdown but nothing failed the pipeline
+   early — v0.1.2 shipped mislabeled (tag v0.1.2, version.go 0.1.1) and
+   v0.1.3 was published untagged (tag not live on origin before publish).
+   Both are now caught by scripts/release-gate.sh (runs in CI + pre-publish):
+   version-constant == tag, CHANGELOG entry, tag live on origin, release is a
+   DRAFT, assets named for the version, binary --version == version.
+   ALWAYS confirm the tag is live on origin before saying a draft is ready.
+   (DECISIONS #94/#95)
 
 ---
 
-## Release pipeline (proven, follow for v0.1.2+)
+## Release pipeline (proven, follow for v0.1.3+)
 
 1. Changes as PRs → user merges (agent never pushes/merges main).
-2. Tag = trigger: `git tag -a vX.Y.Z -m msg <main>` + push. CI gates, then
+2. **`bash scripts/release-gate.sh`** runs in CI as a Release-gate step (after
+   the quality gate): version-constant vs tag, CHANGELOG entry. A drift fails
+   the PR before merge — this is what would have caught v0.1.2.
+3. Tag = trigger: `git tag -a vX.Y.Z -m msg <main>` + push. CI gates, then
    release job builds `dist/*` via `scripts/release.sh`, attaches as DRAFT.
-3. User reviews + publishes. Agent never publishes.
-4. Redo: delete draft + tag (local + remote), re-tag on new main.
+4. **Pre-publish: `bash scripts/release-gate.sh --tag vX.Y.Z --release-url <draft>`**
+   — confirms tag live on origin + release is a DRAFT + assets are
+   correctly named/versioned. A release published without its tag on origin
+   becomes UNTAGGED (the v0.1.3 failure) — the gate catches that.
+5. User reviews + publishes. Agent never publishes.
+6. Redo: delete draft + tag (local + remote), re-tag on new main.
 `release.sh`: `dohping_<ver>_<os>_<arch>.tar.gz`/`.zip`, plain binary inside,
 README+CHANGELOG+LICENSE, SHA256SUMS. Test from CLEAN tree (`rm -rf dist`).
 `go tool dist list` = ground truth (darwin/windows have no 32-bit arm).
