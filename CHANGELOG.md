@@ -15,12 +15,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - Windows release builds strip the symbol table and debug info (`-s -w`):
   the binary is smaller and the antivirus false positive is less likely.
-- ICMP probing now escalates at probe time, not just socket-open time. When
-  an unprivileged socket opens but every probe fails with a non-permission
-  error, dohping falls through to the system `ping` command in the same
-  probe call. The tool now works anywhere `ping` works (including on a
-  Raspberry Pi that ships `/bin/ping` with a setuid bit) instead of showing
-  a bare error and needing `sudo`.
+- Windows: color now renders in classic cmd.exe and PowerShell (ANSI
+  virtual terminal processing enabled), and the liveness bar falls back to
+  an ASCII spinner where the block glyphs are unavailable.
+- `-n` is a shortcut for `--no-color`.
+- ICMP probing now falls back to the system `ping` when a socket opens but
+  every probe fails, so `dohping` works wherever `ping` works instead of
+  showing a bare error and needing `sudo`.
 
 ## [0.1.1] - 2026-08-25
 
