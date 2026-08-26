@@ -814,6 +814,8 @@ Behavior:
   the display line for the new state is painted
 - the bell is suppressed when stdout is not a terminal (no `\a` in piped or
   redirected output)
+- the bell never appears in log files: it is a display-only notification and is
+  written only to stdout, never to the log writer (see Section 14)
 - the bell is suppressed in quiet mode (see Section 12)
 - whether the bell audibly rings or is shown as a visual flash depends on the
   terminal emulator and its configuration; `dohping` only emits the BEL
