@@ -556,6 +556,7 @@ When quiet mode is enabled:
 - window mode is suppressed
 - plain line mode is suppressed
 - live updates are suppressed
+- the terminal bell is suppressed
 - log file output still occurs if configured
 - fatal errors should still be reported to stderr
 
@@ -765,6 +766,7 @@ dohping [options] HOST
 | `--no-window` | Disable window mode (conflicts with `--window-lines`) | off |
 | `--window-lines N` | Number of visible lines in window mode (implies `--window`) | `10` |
 | `--timestamp-format FORMAT` | Display timestamp format | `HH:MM:SS` |
+| `--bell` | Sound the terminal bell on a confirmed status change | off |
 
 ### 16.3 Logging Options
 
@@ -788,6 +790,34 @@ Non-conflicts by design:
 - `--window` with `--window-lines` (compatible; `--window-lines` implies `--window`)
 - `--quiet` with `--window` (quiet wins; documented)
 - `NO_COLOR` with `--color=always` (environment overrides flag; not an error)
+
+### 16.5 Terminal Bell
+
+`--bell` sounds the terminal bell (`\a`, BEL) when the monitored status
+*changes*. It is a notification for state transitions, not a probe-by-probe
+signal.
+
+A status change is a confirmed transition between established states: `up` to
+`down`, `down` to `up`, or either to `error`. It is **not**:
+
+- the initial establishment of status at startup (`unknown` → `up`/`down`) —
+  that is the monitor coming online, not a change;
+- a single probe failure during the hysteresis ramp — the status has not
+  flipped until the configured `--down-after`/`--up-after` threshold is met.
+
+So the bell is keyed on confirmed transitions only, which the state engine
+already distinguishes.
+
+Behavior:
+
+- the bell is emitted once per transition, as a standalone leading write before
+  the display line for the new state is painted
+- the bell is suppressed when stdout is not a terminal (no `\a` in piped or
+  redirected output)
+- the bell is suppressed in quiet mode (see Section 12)
+- whether the bell audibly rings or is shown as a visual flash depends on the
+  terminal emulator and its configuration; `dohping` only emits the BEL
+  control character
 
 ## 17. Display Mode Selection Rules
 
