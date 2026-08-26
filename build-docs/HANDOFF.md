@@ -123,6 +123,13 @@ work. README restructured, CHANGELOG finalized, Windows resolves as ship.
    DRAFT, assets named for the version, binary --version == version.
    ALWAYS confirm the tag is live on origin before saying a draft is ready.
    (DECISIONS #94/#95)
+10. The markdown checklist was never the problem. It listed every gate in
+    plain words; the failures happened because it was NOT READ and followed,
+    not because it lacked teeth. A script is a backstop, not a substitute for
+    the habit: READ PUBLISH-CHECKLIST.md and run it before every push and
+    before every "ready to publish". Never rationalize a skipped procedure as
+    a tooling gap. (User, 2026-08-26: "There is nothing wrong with markdown
+    that had no real gates if you fucking read it")
 
 ---
 
