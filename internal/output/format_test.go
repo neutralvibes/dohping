@@ -362,6 +362,36 @@ func TestLayoutTrimDropsRightmostColumns(t *testing.T) {
 	}
 }
 
+func TestFrameCharDefault(t *testing.T) {
+	want := []rune{'▁', '▃', '▅', '▇'}
+	for i := 0; i < 8; i++ {
+		if fr := frameChar(i); fr != want[i%len(want)] {
+			t.Errorf("frameChar(%d) = %q, want %q (default bar)", i, fr, want[i%len(want)])
+		}
+	}
+}
+
+func TestSetFramesOverrides(t *testing.T) {
+	// An ASCII fallback (classic Windows consoles) must replace the bar.
+	ascii := []rune{'-', '\\', '|', '/'}
+	SetFrames(ascii)
+	defer SetFrames([]rune{'▁', '▃', '▅', '▇'}) // restore for other tests
+	for i := 0; i < 8; i++ {
+		if fr := frameChar(i); fr != ascii[i%len(ascii)] {
+			t.Errorf("frameChar(%d) = %q, want %q (ascii spinner)", i, fr, ascii[i%len(ascii)])
+		}
+	}
+}
+
+func TestSetFramesIgnoresEmpty(t *testing.T) {
+	// An empty set must not clobber the active frames.
+	before := frameChar(0)
+	SetFrames(nil)
+	if fr := frameChar(0); fr != before {
+		t.Errorf("SetFrames(nil) changed frame %q -> %q", before, fr)
+	}
+}
+
 func TestRuneBasedCellWidth(t *testing.T) {
 	// cellWidth is the display-cell width: runes minus ANSI escape
 	// sequences (SGR colors add bytes, not cells) — the exact measure the

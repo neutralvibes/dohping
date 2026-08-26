@@ -4,6 +4,11 @@
 # Reproducible: -trimpath + no VCS stamping; the same source + Go version
 # yields byte-identical binaries. Version is injected via ldflags.
 #
+# Release builds are stripped (-s -w): the symbol table and DWARF debug info
+# are dropped for smaller downloads and less for antivirus heuristics to
+# pattern-match. Stripping is standard for release binaries; dev builds keep
+# debug info for readable crash traces.
+#
 # Packaging: each target ships as a compressed archive named
 #   dohping_<version>_<os>_<arch>.tar.gz    (unix: gzip, exec bit set)
 #   dohping_<version>_<os>_<arch>.zip       (windows: plain dohping.exe)
@@ -83,8 +88,9 @@ for target in "${targets[@]}"; do
   if [ -n "$goarm" ]; then
     envs+=("GOARM=$goarm")
   fi
+  ldflags="-X dohping/internal/version.Version=$VERSION -s -w"
   env "${envs[@]}" "$GOROOT_BIN/go" build -trimpath -buildvcs=false \
-    -ldflags "-X dohping/internal/version.Version=$VERSION" \
+    -ldflags "$ldflags" \
     -o "$STAGE/$bin" "$ROOT/cmd/dohping"
 
   base="dohping_${VERSION}_${os}_${assetarch}"

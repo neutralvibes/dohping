@@ -37,7 +37,7 @@ Options:
 Display:
   -q, --quiet                Suppress display output (logging still works)
       --no-header            Do not print the column header
-      --no-color             Disable color output
+  -n, --no-color             Disable color output
       --color MODE           Color mode: auto, always, never (default auto)
       --live MODE            Live updates: auto, on, off (default auto)
       --no-live              Disable live updating

@@ -1,8 +1,21 @@
 # Changelog
 
-All notable changes to dohping are documented here. The format is based on
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
-adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.1.2] - 2026-08-25
+
+### Added
+- README note explaining the Windows Defender `Trojan:Win32/Wacatac.C!ml`
+  false positive and how to handle it.
+- `-n` as a new shortcut for `--no-color`.
+
+### Fixed
+- Windows: color now renders in classic cmd.exe and PowerShell (ANSI
+  virtual terminal processing enabled), and the liveness bar falls back to
+  an ASCII spinner where the block glyphs are unavailable.
+- ICMP probing now falls back to the system `ping` when a socket opens but
+  every probe fails, so `dohping` works wherever `ping` works instead of
+  showing a bare error and needing `sudo`.
+- Release binaries are now stripped (`-s -w`): smaller downloads and less
+  for antivirus heuristics to pattern-match.
 
 ## [0.1.1] - 2026-08-25
 
@@ -26,5 +39,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Liveness animation, resize handling for reflowing terminals, predictable
   exit codes, interactive `q` quit.
 
+[0.1.2]: https://github.com/neutralvibes/dohping/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/neutralvibes/dohping/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/neutralvibes/dohping/releases/tag/v0.1.0

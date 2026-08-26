@@ -275,6 +275,11 @@ func TestNonConflicts(t *testing.T) {
 	// Redundant-but-not-opposed combinations must parse fine.
 	mustParse(t, "--no-color", "--color=never", "h")
 	mustParse(t, "--color=never", "--no-color", "h")
+	// -n is a shortcut for --no-color.
+	opts := mustParse(t, "-n", "h")
+	if !opts.NoColor {
+		t.Error("-n did not set NoColor")
+	}
 	mustParse(t, "--no-live", "--live=off", "h")
 	mustParse(t, "--no-window", "h")
 	mustParse(t, "--window", "--window-lines", "5", "h")
@@ -374,7 +379,7 @@ func TestHelpContent(t *testing.T) {
 		"Usage:", "dohping [options] HOST",
 		"--help", "-V, --version", "-i, --interval", "-t, --timeout", "-c, --count",
 		"-p, --probe", "-d, --down-after", "-u, --up-after",
-		"-q, --quiet", "--no-header", "--no-color", "--color MODE", "--live MODE",
+		"-q, --quiet", "--no-header", "-n, --no-color", "--color MODE", "--live MODE",
 		"--no-live", "-w, --window", "--no-window", "--window-lines",
 		"--timestamp-format", "-l, --log-file", "--log-format",
 		"Implies --window", "(default 10)",
