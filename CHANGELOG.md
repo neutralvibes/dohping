@@ -8,9 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - README note explaining the Windows Defender `Trojan:Win32/Wacatac.C!ml`
-  false positive and how to handle it: verify the source, add a Defender
-  exclusion when compiling locally, or choose "Allow on device" in Windows
-  Security's protection history.
+  false positive and how to handle it.
 - `-n` as a new shortcut for `--no-color`.
 
 ### Fixed
