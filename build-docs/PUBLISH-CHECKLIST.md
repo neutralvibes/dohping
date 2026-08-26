@@ -12,6 +12,11 @@ RED gate.
 
 - [ ] `scripts/release-gate.sh --tag vX.Y.Z` exits 0 (version-constant
       matches the tag, CHANGELOG has the entry, tag is live on origin)
+- [ ] **Rig INDEX regenerated after every publish to the rig**: run
+      `update-index.sh` in the served dohping dir (or the agent does it as
+      part of the publish step) so `INDEX.txt` reflects the shipped builds.
+      The index is auto-derived from the files; the step is remembering to
+      run it. This is a REQUIRED publish step, not a nice-to-have.
 - [ ] CI is GREEN on the PR before merge (gate + gate-windows jobs); a red
       CI is a merge blocker
 - [ ] `publish/` derived by `bash scripts/publish-github.sh` from a CLEAN
