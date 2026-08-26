@@ -104,7 +104,7 @@ jobs:
 
       - name: Real-PTY probe scenarios
         run: |
-          for s in window window-same-band window-subfloor plain; do
+          for s in window window-same-band window-subfloor plain quit; do
             python3 scripts/pty-resize-probe.py "$s"
           done
 

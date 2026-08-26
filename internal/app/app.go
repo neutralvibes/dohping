@@ -319,6 +319,23 @@ func defaultSizeFn(w io.Writer) func() (int, int) {
 	}
 }
 
+// classifyKey maps a raw-mode byte to a keyEvent. q/Q quits (exit 0),
+// 0x03 (Ctrl-C in raw mode, ISIG off) interrupts (exit 130), Ctrl-D is
+// EOF for the reader. Unknown bytes return ok=false and are ignored.
+// Extracted from startKeyReader so the byte-mapping contract is testable
+// without a PTY.
+func classifyKey(b byte) (keyEvent, bool) {
+	switch b {
+	case 'q', 'Q':
+		return keyQuit, true
+	case 0x03:
+		return keyCtrlC, true
+	case 0x04: // Ctrl-D: EOF for the reader, terminal restored
+		return keyEOF, true
+	}
+	return 0, false
+}
+
 // startKeyReader puts stdin into raw mode and reads keys in a goroutine.
 // q/Q quits (exit 0); 0x03 (Ctrl-C in raw mode, ISIG off) interrupts
 // (exit 130). Other bytes (arrows, ESC, …) are consumed and ignored. The
@@ -340,15 +357,8 @@ func startKeyReader(f *os.File, out chan<- keyEvent) (restore func(), err error)
 				out <- keyEOF
 				return
 			}
-			switch b {
-			case 'q', 'Q':
-				out <- keyQuit
-				return
-			case 0x03:
-				out <- keyCtrlC
-				return
-			case 0x04: // Ctrl-D: EOF for the reader, terminal restored
-				out <- keyEOF
+			if ev, ok := classifyKey(b); ok {
+				out <- ev
 				return
 			}
 		}

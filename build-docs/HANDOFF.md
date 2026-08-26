@@ -167,7 +167,9 @@ Linters at `~/go/bin/`. **gosec from prebuilt tarball, NEVER `go install gosec@l
   through termScreen/noOnlcrScreen and assert the screen, not escape lists).
 - Animation: drive `Tick()` with injected clock. Resize: termScreen emulator
   (resize vs reflowResize). Real-PTY: `python3 scripts/pty-resize-probe.py`
-  (fresh build first — stale-build trap).
+  (fresh build first — stale-build trap). Scenarios: window /
+  window-same-band / window-subfloor / plain / **quit** (sends `q` to the pty
+  master, asserts exit 0 — the interactive q-quit contract, #93).
 - **PASTE BLINDNESS**: user's terminal copies wrapped lines as ONE logical line;
   pastes never prove no-wrap. User's screen = evidence; emulator + PTY = proof.
 - Resize forensics: `DOHPING_DEBUG=<path> dohping --window HOST`. Ask for the
