@@ -239,8 +239,8 @@ dist/                        release artifacts
   Gate: `build-docs/PUBLISH-CHECKLIST.md` before EVERY push + pre-commit hook.
 - Rulesets, not classic branch protection. Final config (proven on repotest):
   **Admin bypass "For pull requests only"** — force-push/direct push rejected,
-  owner's PR merges allowed, non-admin gated by count=1. dohping action PENDING
-  (user UI). Token can't edit rulesets (403).
+  owner's PR merges allowed, non-admin gated by count=1. **Applied to dohping
+  (user confirmed done).** Token can't edit rulesets (403).
 
 ## Held plan: reusable terminal test rig (2026-08-18, HELD)
 
@@ -252,12 +252,11 @@ Windows CI = unit only.
 
 ## Pending / parked
 
-- **dohping ruleset** switch (user UI action) — still open.
 - **Held**: reusable terminal test rig (above).
-- **Rig cleanup** (user's call): superseded `dohping-windows-amd64-14338619.exe`,
-  dead `dohping-demo-synthetic-20260821.gif`, and the rig still carries v0.1.0-era
-  plain builds (dohping-linux-amd64 reports 0.1.0) that predate the v0.1.2/0.1.3
-  releases — the rig has NOT been updated with the released v0.1.3 binaries yet.
+- **Rig cleanup**: deadwood removed 2026-08-26 (superseded exe/gif/old zips
+  gone, v0.1.3 Windows zips in); served linux-amd64 verified `dohping 0.1.3`
+  (sha c167ef9f, matches INDEX). INDEX regenerated same day; old versioned
+  entries remain as the build ledger's history.
 - **Unverified-forever candidates**: darwin/windows binaries (never run here).
 - The three local candidates (`-p tcp`, `--log-file`, `--timestamp-format rfc3339`)
   were verified live 2026-08-26 (#92) — no longer parked.
