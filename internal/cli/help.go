@@ -48,6 +48,7 @@ Display:
                              Implies --window. (default 10)
       --timestamp-format F   Display timestamp format: HH:MM:SS | rfc3339
                              (default HH:MM:SS)
+      --bell                 Sound the terminal bell on a status change
 
 Logging:
   -l, --log-file PATH        Append finalized status events to PATH

@@ -71,6 +71,8 @@ type Options struct {
 	NoWindow    bool
 	WindowLines int
 
+	Bell bool
+
 	DownAfter int
 	UpAfter   int
 
@@ -190,6 +192,7 @@ func Parse(args []string) (*Options, Action, error) {
 	fs.BoolVar(&opts.NoWindow, "no-window", false, "")
 	fs.IntVar(&opts.WindowLines, "window-lines", opts.WindowLines, "")
 	fs.StringVar(&opts.TimestampFormat, "timestamp-format", opts.TimestampFormat, "")
+	fs.BoolVar(&opts.Bell, "bell", false, "")
 
 	// Logging options.
 	fs.StringVar(&opts.LogFile, "l", "", "")

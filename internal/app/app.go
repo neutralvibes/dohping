@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/term"
 
+	"dohping/internal/bellx"
 	"dohping/internal/cli"
 	"dohping/internal/debugx"
 	"dohping/internal/logx"
@@ -189,6 +190,15 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	sigCh, stopSig := signalx.Listen()
 	defer stopSig()
 
+	// Terminal bell: a peer consumer of the event stream, like the
+	// logger — the display layer never knows it exists. It sounds only
+	// when requested, on a real terminal, and not in quiet mode (quiet
+	// suppresses all output, and the bell is output).
+	var bell *bellx.Bell
+	if opts.Bell && tty.Stdout && !opts.Quiet {
+		bell = bellx.New(stdout, true)
+	}
+
 	// The liveness animation advances on a fixed 1-second timer,
 	// independent of probe cadence: with a long --interval the probe
 	// events are rare, but the display must still visibly move every
@@ -216,6 +226,9 @@ loop:
 		case ev, ok := <-events:
 			if !ok {
 				break loop // Run finished: count exhausted or cancelled
+			}
+			if bell != nil {
+				bell.Handle(ev) // leading standalone \a on a status change
 			}
 			disp.Handle(ev)
 			if logger != nil {
