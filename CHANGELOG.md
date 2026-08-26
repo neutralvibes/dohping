@@ -13,8 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Security's protection history.
 
 ### Changed
-- Windows release builds strip the symbol table and debug info (`-s -w`):
-  the binary is smaller and the antivirus false positive is less likely.
+- Release binaries strip the symbol table and debug info (`-s -w`):
+  smaller downloads and less for antivirus heuristics to pattern-match.
 - Windows: color now renders in classic cmd.exe and PowerShell (ANSI
   virtual terminal processing enabled), and the liveness bar falls back to
   an ASCII spinner where the block glyphs are unavailable.
