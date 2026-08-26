@@ -35,6 +35,7 @@ PUBLIC_ITEMS=(
   docs
   assets
   scripts/release.sh
+  scripts/release-gate.sh
   scripts/check.sh
   scripts/pty-resize-probe.py
   .github/workflows/ci.yml

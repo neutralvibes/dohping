@@ -5,8 +5,13 @@ It grows over time — add items when we learn what matters.
 
 ## Hard gates (mechanical — enforced, not optional)
 
-- [ ] CI workflow present in the pushed branch:
-      `git -C publish ls-files .github/workflows/ci.yml` → present
+Run `scripts/release-gate.sh` — the ENFORCED version of this checklist. It
+fails the pipeline (non-zero exit) when any hard gate is red; the markdown
+below is the human-readable record of what it enforces. Do not publish on a
+RED gate.
+
+- [ ] `scripts/release-gate.sh --tag vX.Y.Z` exits 0 (version-constant
+      matches the tag, CHANGELOG has the entry, tag is live on origin)
 - [ ] CI is GREEN on the PR before merge (gate + gate-windows jobs); a red
       CI is a merge blocker
 - [ ] `publish/` derived by `bash scripts/publish-github.sh` from a CLEAN
