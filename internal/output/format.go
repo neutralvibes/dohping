@@ -172,7 +172,20 @@ func (l *Layout) Header() string {
 // minimum), one frame per probe event (user request 2026-08-17). The bar
 // rises then resets — the reset jump is the visible "tick" that draws the
 // eye.
+//
+// Classic Windows consoles (cmd.exe, PowerShell) cannot render the block
+// glyphs (U+2581..U+2587) with their codepage fonts, so main.go swaps in
+// an ASCII spinner on those platforms via SetFrames.
 var liveFrames = []rune{'▁', '▃', '▅', '▇'}
+
+// SetFrames replaces the liveness animation frame set. Called once at
+// startup on platforms whose console cannot render the default glyphs.
+// Safe to call before any display exists.
+func SetFrames(frames []rune) {
+	if len(frames) > 0 {
+		liveFrames = frames
+	}
+}
 
 // frameChar returns the animation frame for counter n (cycles).
 func frameChar(n int) rune { return liveFrames[n%len(liveFrames)] }

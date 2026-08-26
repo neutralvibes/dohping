@@ -1,7 +1,15 @@
 # CI for dohping — one definition of green.
 #
-# gate (linux): gofmt, vet, race tests, gosec, real-PTY probe scenarios
-#   (TCP mode — no ICMP caps on runners), release matrix + SHA256SUMS.
+# The gate is scripts/check.sh (single source of truth): the same gate the
+# developer runs locally — gofmt, vet, race tests, and the analyzers
+# (golangci-lint, staticcheck, gosec, govulncheck), each SKIP-not-FAIL when
+# absent. CI pre-installs every tool so nothing is skipped on the runner.
+# The steps below the gate (fresh build, debug-compiled-out, PTY probe,
+# release matrix) are extra CI-only verification, NOT part of the green
+# definition — they must not be confused with the gate itself.
+#
+# gate (linux): scripts/check.sh + real-PTY probe scenarios (TCP mode — no
+#   ICMP caps on runners), release matrix + SHA256SUMS.
 # gate-windows: unit tests + vet only (probe is POSIX; the emulator-grid
 #   unit tests cover the platform matrix).
 #
@@ -55,20 +63,22 @@ jobs:
           mv staticcheck/staticcheck /usr/local/bin/
           staticcheck -version
 
-      - name: Quality gate (gofmt, vet, race, debug build, analyzers)
+      - name: Install govulncheck (supply-chain, pinned)
         run: |
-          set -uo pipefail
-          # The project's green definition: gofmt, vet, race tests (both the
-          # release and the debug-tagged build), then the static analyzers.
-          gofmt_files="$(git ls-files '*.go')"
-          test -z "$(gofmt -l $gofmt_files)"
-          go vet ./...
-          go test -race -count=1 ./...
-          go vet -tags debug ./...
-          go test -race -count=1 -tags debug ./...
-          golangci-lint run
-          staticcheck ./...
-          gosec -quiet ./...
+          # govulncheck has no prebuilt release binaries (the golang/vuln
+          # releases carry no assets), so the documented install is
+          # `go install` of the cmd package. Pinned to the same version the
+          # local gate uses (v1.7.0) so CI == dev.
+          GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck -version
+
+      - name: Quality gate (single source of truth, scripts/check.sh)
+        run: |
+          # One definition of green, everywhere. check.sh is the SAME gate the
+          # developer runs locally — run with --ci so a missing optional tool
+          # is a FAIL (the install steps above provision every analyzer, so a
+          # SKIP here would mean the release path silently lost a check).
+          bash scripts/check.sh --ci
 
       - name: Fresh build (stale-build trap)
         run: |
@@ -94,7 +104,7 @@ jobs:
 
       - name: Real-PTY probe scenarios
         run: |
-          for s in window window-same-band window-subfloor plain; do
+          for s in window window-same-band window-subfloor plain quit; do
             python3 scripts/pty-resize-probe.py "$s"
           done
 

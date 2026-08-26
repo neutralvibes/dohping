@@ -2,7 +2,7 @@
 
 > *"Doh!"* Homer Simpson, every time `ping` scrolls him into oblivion.
 
-**dohping** is a status-line based ping for network monitoring. It tells you if a host is up, for how long, and how fast, as one clean, live-updating line. When it flips to **down**, you see exactly when and for how long. No root required in some modes.
+**dohping** is a status-line based ping for network monitoring. It tells you if a host is up, for how long, and how fast, as one clean, live-updating line. When it flips to **down**, you see exactly when and for how long. No root needed for TCP probes; ICMP falls back to the system `ping` when unprivileged sockets are blocked.
 
 ![dohping watching a flapping host](assets/dohping-demo.gif)
 
@@ -52,6 +52,8 @@ dohping --window example.com
 
 Press `q` to quit cleanly. `Ctrl-C` works too.
 
+Eager to try it? Just head to [Installation](#installation).
+
 ## What makes it different
 
 - **Stateful, not noisy**: one line per status, period. Read your scrollback like a log, not a haystack.
@@ -60,28 +62,6 @@ Press `q` to quit cleanly. `Ctrl-C` works too.
 - **Resize-aware**: drag your terminal corner around while it runs. It repaints cleanly without fighting your terminal.
 - **Scriptable**: predictable exit codes, optional JSON logging, and `--quiet` for clean output.
 - **Cross-platform**: Linux, macOS, Windows (amd64 and arm64).
-
-## Installation
-
-### Release binaries
-
-Pre-built binaries for Linux, macOS, and Windows are available from the [releases page](https://github.com/neutralvibes/dohping/releases).
-
-### From source
-
-Requires Go >= 1.26.
-
-```sh
-go build -o dohping ./cmd/dohping
-```
-
-### Build all targets
-
-```sh
-./scripts/release.sh dist
-```
-
-Artifacts land in `dist/` as `dohping-<os>-<arch>` plus `SHA256SUMS`.
 
 ## When to use it
 
@@ -110,7 +90,7 @@ Options:
 Display:
   -q, --quiet                Suppress display output
       --no-header            Skip the column header
-      --no-color             Disable color output
+  -n, --no-color             Disable color output
       --color MODE           Color mode: auto, always, never
       --live MODE            Live updates: auto, on, off
       --no-live              Disable live updating
@@ -174,6 +154,126 @@ dohping -q -l events.log -i 5 example.com
 ```
 
 No display, but every status change is appended to `events.log` (text or JSON), fsync'd, with `0600` permissions.
+
+## Installation
+
+### Release binaries
+
+Pre-built binaries for Linux, macOS, and Windows are available from the [releases page](https://github.com/neutralvibes/dohping/releases).
+
+### From source
+
+Requires Go >= 1.26.
+
+```sh
+go build -o dohping ./cmd/dohping
+```
+
+### Build all targets
+
+```sh
+./scripts/release.sh dist
+```
+
+Artifacts land in `dist/` as `dohping-<os>-<arch>` plus `SHA256SUMS`.
+
+### Linux installation
+
+Download the Linux archive for your architecture from the [releases page](https://github.com/neutralvibes/dohping/releases). It is named like `dohping_<version>_linux_<arch>.tar.gz`, and the binary inside is named `dohping`.
+
+First extract the archive (this unpacks the binary plus a copy of this README, the changelog, and the license):
+
+```sh
+tar -xzf dohping_*.tar.gz
+```
+
+Then install the binary one of two ways.
+
+#### System-wide install (all users)
+
+```sh
+sudo mv dohping /usr/local/bin/
+```
+
+#### Per-user install (no sudo)
+
+```sh
+mkdir -p ~/.local/bin
+mv dohping ~/.local/bin/
+```
+
+`~/.local/bin` is on the default PATH on Debian and Raspberry Pi OS. It is added when the shell profile runs, so if the directory did not exist at login you may need to log out and back in (or start a new shell) for it to appear on PATH. On other distributions you may need to add it to `PATH` yourself.
+
+#### Permissions
+
+Linux normally blocks unprivileged users from opening raw network sockets, which ICMP timing needs. `dohping` works around this with a fallback chain: raw socket, then an unprivileged ping socket, then the system `ping` command. The system `ping` is the tier that lets a normal user run `dohping` without sudo. Wherever `ping` already works for you, `dohping` works too.
+
+How `ping` gets its privilege differs by distribution:
+
+- **Raspberry Pi OS and many Debian-based systems** give `ping` the setuid bit, so any user can run it. `dohping` detects that and uses it automatically. No configuration needed.
+- **Distributions moving to stricter defaults** (and some that ship `ping` with no special privilege at all) may not let a normal user run `ping` either.
+
+If `dohping` does report a permission error and you want to run it without `sudo`, the modern fix is a single fine-grained privilege granted to the binary:
+
+```sh
+sudo setcap cap_net_raw=+ep /usr/local/bin/dohping
+```
+
+That grants only the one capability the raw socket needs, not full root. After that, any user can run `dohping` directly.
+
+If ICMP is blocked entirely, `--probe tcp` needs no privileges at all.
+
+### macOS installation
+
+Download the macOS archive for your architecture from the [releases page](https://github.com/neutralvibes/dohping/releases). It is named like `dohping_<version>_darwin_<arch>.tar.gz`, and the binary inside is named `dohping`.
+
+Extract the archive:
+
+```sh
+tar -xzf dohping_*.tar.gz
+```
+
+Install it to a directory on your PATH, for example `/usr/local/bin`:
+
+```sh
+sudo mv dohping /usr/local/bin/
+```
+
+macOS may block the first run of a downloaded, unsigned binary. If you see "cannot be opened because it was developed by an unidentified developer", right-click the file and choose Open, or remove the quarantine attribute:
+
+```sh
+xattr -dr com.apple.quarantine dohping
+```
+
+### Windows installation
+
+Download the Windows archive for your architecture from the [releases page](https://github.com/neutralvibes/dohping/releases). It is named like `dohping_<version>_windows_<arch>.zip`, and the binary inside is named `dohping.exe`.
+
+Extract the archive. From PowerShell:
+
+```powershell
+Expand-Archive dohping_*.zip
+```
+
+Or right-click the zip and choose Extract All. The binary runs directly from the extracted folder:
+
+```powershell
+.\dohping.exe 192.168.1.182
+```
+
+To run `dohping` from any folder, add the extracted directory to your PATH.
+
+#### ⚠️ Note on Windows Defender (Wacatac.C!ml False Positive)
+
+When downloading or compiling this utility on Windows, Windows Defender may flag the executable as `Trojan:Win32/Wacatac.C!ml`.
+
+This is a well-known **false positive** triggered by Windows' machine-learning algorithm. Because Go binaries are statically compiled and this tool interacts directly with Windows console API flags (to enable terminal colors), the antivirus erroneously guesses it is a threat due to its lack of a global digital signature.
+
+#### How to resolve:
+
+1. You can verify the source code yourself. It contains no malicious payloads.
+2. If compiling locally, add your build directory to your Windows Defender exclusion list.
+3. If using the pre-compiled binary, you can click "Allow on device" within Windows Security's protection history.
 
 ## Display modes
 

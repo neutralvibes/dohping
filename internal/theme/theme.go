@@ -72,6 +72,9 @@ type Env struct {
 // Enabled decides whether color output is active. Disabled
 // when any of: --no-color / --color=never, NO_COLOR set non-empty,
 // stdout not a terminal, TERM=dumb. NO_COLOR overrides --color=always.
+// On Windows, ANSI processing is enabled at startup (console_windows.go),
+// so the classic consoles render color too; no platform-specific
+// detection is needed here.
 func Enabled(cfg Config, isTTY bool, env Env) bool {
 	if cfg.NoColor || cfg.ColorMode == "never" {
 		return false
