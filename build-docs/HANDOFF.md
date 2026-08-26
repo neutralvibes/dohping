@@ -204,7 +204,8 @@ dist/                        release artifacts
 
 - **`build-docs/`** tracked in private repo, never published. **`publish/`**
   (gitignored) = separate git repo with exactly PUBLIC_ITEMS (`README.md LICENSE
-  go.mod go.sum cmd internal docs assets scripts/{release.sh,pty-resize-probe.py}
+  go.mod go.sum cmd internal docs assets
+  scripts/{release.sh,check.sh,pty-resize-probe.py}
   .github/workflows/ci.yml CHANGELOG.md`), derived by publish-github.sh: clean
   tree required, asserts nothing forbidden + committed list == contract EXACTLY,
   commits snapshot named after private sha. NEVER pushes alone — agent adds
