@@ -2,9 +2,12 @@
 
 ## [0.1.2] - 2026-08-25
 
+### Added
 - README note explaining the Windows Defender `Trojan:Win32/Wacatac.C!ml`
   false positive and how to handle it.
 - `-n` as a new shortcut for `--no-color`.
+
+### Fixed
 - Windows: color now renders in classic cmd.exe and PowerShell (ANSI
   virtual terminal processing enabled), and the liveness bar falls back to
   an ASCII spinner where the block glyphs are unavailable.
