@@ -80,6 +80,16 @@ jobs:
           # SKIP here would mean the release path silently lost a check).
           bash scripts/check.sh --ci
 
+      - name: Release gate (version/changelog/tag consistency)
+        run: |
+          # Enforced release checklist: version.go must be semver, the
+          # CHANGELOG must carry the version, and when this tree is at a
+          # version tag the constant and tag must agree. This is what would
+          # have caught the v0.1.2 drift (tag v0.1.2, version.go 0.1.1) in
+          # CI instead of at the release draft. Not at a tag -> version +
+          # changelog checks still run.
+          bash scripts/release-gate.sh
+
       - name: Fresh build (stale-build trap)
         run: |
           rm -f /tmp/dohping-test
