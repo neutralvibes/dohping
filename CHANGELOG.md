@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.3] - 2026-08-26
+
+### Fixed
+- Release versioning: the v0.1.2 tag shipped archives and binaries labeled
+  `0.1.1` because the version constant was never bumped to match the release.
+  v0.1.3 reports the correct version, and the release script now refuses to
+  build when the release tag and the version constant disagree, so a
+  mislabeled release cannot be created again.
+
 ## [0.1.2] - 2026-08-25
 
 ### Added
@@ -39,6 +48,7 @@
 - Liveness animation, resize handling for reflowing terminals, predictable
   exit codes, interactive `q` quit.
 
+[0.1.3]: https://github.com/neutralvibes/dohping/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/neutralvibes/dohping/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/neutralvibes/dohping/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/neutralvibes/dohping/releases/tag/v0.1.0
