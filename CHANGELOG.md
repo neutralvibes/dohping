@@ -11,12 +11,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   false positive and how to handle it: verify the source, add a Defender
   exclusion when compiling locally, or choose "Allow on device" in Windows
   Security's protection history.
+- `-n` as a new shortcut for `--no-color`.
 
 ### Fixed
 - Windows: color now renders in classic cmd.exe and PowerShell (ANSI
   virtual terminal processing enabled), and the liveness bar falls back to
   an ASCII spinner where the block glyphs are unavailable.
-- `-n` is now a shortcut for `--no-color`.
 - ICMP probing now falls back to the system `ping` when a socket opens but
   every probe fails, so `dohping` works wherever `ping` works instead of
   showing a bare error and needing `sudo`.
