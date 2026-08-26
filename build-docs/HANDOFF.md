@@ -108,6 +108,12 @@ work. README restructured, CHANGELOG finalized, Windows resolves as ship.
 6. No em-dashes in public prose. Brief > verbose in changelogs ("information
    should be brief and to the point").
 7. Never blame browser cache without proof (the ETag fix proved the real cause).
+8. Don't park runnable features as "unverified-forever (probe if asked)" — if
+   it runs on this box, verify it myself, unprompted. The three parked
+   candidates (`-p tcp`, `--log-file`, `--timestamp-format rfc3339`) were
+   Linux-runnable the whole time and took a user prompt to check (DECISIONS
+   #92). Only cross-compiled darwin/windows binaries need the user. "Tests
+   for everything" is the standing standard.
 
 ---
 
@@ -222,7 +228,10 @@ Windows CI = unit only.
 
 - **dohping ruleset** switch (user UI action).
 - **Held**: reusable terminal test rig (above).
-- **Unverified-forever candidates** (probe if asked): `-p tcp`, `--log-file`
-  output, `--timestamp-format rfc3339`, darwin/windows binaries (never run).
+- **Verified 2026-08-26 (#92)**: `-p tcp` (up path + closed-port down path),
+  `--log-file`/`--log-format` csv+json (real files written, exit 0), and
+  `--timestamp-format rfc3339` — all exercised live in the sandbox, all
+  correct, no code changes. Only darwin/windows binaries stay unverified here
+  (this box can't run them) — user-verifiable on real hardware.
 - Old rig build `dohping-windows-amd64-14338619.exe` (superseded) + dead
   `dohping-demo-synthetic-20260821.gif` — user's call to remove.
