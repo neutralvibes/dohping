@@ -197,6 +197,30 @@ Plain line mode is the default.
 
 If --window-lines is present and window mode has not been explicitly disabled, window mode is enabled automatically.
 
+### 6.1 Resolution Caption
+
+When the target is a DNS name (not an IP literal) and it resolves successfully,
+`dohping` prints a single caption line above the table header, ping style:
+
+```text
+google.com -> 142.250.190.46
+```
+
+Rules:
+
+- The caption shows the exact IP address the probe resolved at startup — the
+  same address the probes use, never a separate re-resolution.
+- The table is unaffected: the `HOST` column keeps the name, and no column
+  width, resize, or retraction behavior changes.
+- The caption is printed once at startup in both display modes. In plain line
+  mode it appears above the header and lives in scrollback. In window mode it
+  is printed once above the block, which is otherwise unchanged.
+- The caption is display-only: it is never written to the log file.
+- A target given as an IP literal (e.g. `192.168.1.23`, `::1`) produces no
+  caption — the address is already visible in the `HOST` column.
+- The caption is suppressed by `--no-header` and `--quiet`, alongside the
+  header itself.
+
 
 
 ## 7. Plain Line Mode
@@ -208,6 +232,8 @@ Plain line mode is the default display mode.
 In plain line mode:
 
 - A header is displayed unless disabled.
+- When the target is a DNS name, a resolution caption (§6.1) is printed once
+  above the header, unless the header is disabled.
 - Each status period is represented by one line.
 - The last/current line is live-updated while the status remains unchanged.
 - When the status changes, the previous line is finalized.
@@ -335,6 +361,8 @@ Implementations should:
 - handle terminal resize gracefully
 - restore terminal state on exit
 - preferably use an alternate screen or dedicated display region
+- print a resolution caption (§6.1) once above the block at startup for a DNS
+  name target; the block itself is unchanged
 
 If the terminal is too small, `dohping` should either:
 
@@ -555,6 +583,7 @@ When quiet mode is enabled:
 - normal display output is suppressed
 - window mode is suppressed
 - plain line mode is suppressed
+- the resolution caption (§6.1) is suppressed
 - live updates are suppressed
 - log file output still occurs if configured
 - fatal errors should still be reported to stderr
@@ -570,6 +599,8 @@ Header display can be disabled with:
 ```
 
 This suppresses the visible table header in display modes.
+
+It also suppresses the resolution caption (§6.1) for DNS name targets.
 
 It applies to terminal display.
 
@@ -1044,6 +1075,19 @@ Expected:
 - no header
 - plain output
 - live updating disabled automatically if piped
+
+### 23.5 DNS Name Target
+
+```sh
+dohping google.com
+```
+
+Expected:
+
+- a resolution caption (§6.1) is printed once above the header, e.g.
+  `google.com -> 142.250.190.46`
+- the `HOST` column keeps the name `google.com`
+- the table layout is unchanged
 
 ## 24. Summary of Display Semantics
 
