@@ -6,6 +6,7 @@ package logx
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"strconv"
@@ -24,12 +25,17 @@ type Entry struct {
 	Stats    state.Stats
 }
 
-// Logger appends entries to a log file.
+// Logger renders one status event per line (CSV or JSON) and writes it to
+// a sink. The sink is a file (durable, fsynced per event) for --log-file,
+// or stdout for the structured stdout modes — same renderer, same schema,
+// same per-event flush, only the destination differs.
 type Logger struct {
-	f       *os.File
-	format  string // csv | json
-	address string // resolved canonical IP, bracketed when IPv6
-	name    string // DNS name when the target was given as one, else ""
+	w       io.Writer    // sink
+	close   func() error // closes the sink; nil = not owned (stdout)
+	sync    func() error // durability flush; nil = not applicable (stdout)
+	format  string       // csv | json
+	address string       // resolved canonical IP, bracketed when IPv6
+	name    string       // DNS name when the target was given as one, else ""
 }
 
 // Open opens (creating if needed, always appending) the log file.
@@ -47,11 +53,20 @@ func Open(path, format, address, name string) (*Logger, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Logger{f: f, format: format, address: bracketIPv6(address), name: name}, nil
+	return &Logger{w: f, close: f.Close, sync: f.Sync, format: format, address: bracketIPv6(address), name: name}, nil
 }
 
-// Log writes one entry and flushes (append-only durability: a completed
-// event is never lost to a later crash).
+// NewStdout returns a logger that writes structured events to w (stdout)
+// instead of a file: same renderer and schema as the log file, streaming
+// one line per event. The sink is not owned — it is never closed and
+// never fsynced (stdout may be a pipe or terminal).
+func NewStdout(w io.Writer, format, address, name string) *Logger {
+	return &Logger{w: w, format: format, address: bracketIPv6(address), name: name}
+}
+
+// Log writes one entry and flushes. File sinks fsync for append-only
+// durability (a completed event is never lost to a later crash); stdout
+// needs no fsync — the write reaches the pipe/terminal directly.
 func (l *Logger) Log(e Entry) error {
 	var line string
 	if l.format == "json" {
@@ -59,19 +74,24 @@ func (l *Logger) Log(e Entry) error {
 	} else {
 		line = l.textLine(e)
 	}
-	if _, err := l.f.WriteString(line); err != nil {
+	if _, err := io.WriteString(l.w, line); err != nil {
 		return err
 	}
-	return l.f.Sync()
+	if l.sync != nil {
+		return l.sync()
+	}
+	return nil
 }
 
-// Close flushes and closes the file.
+// Close closes the sink if the logger owns it (a file). A stdout logger
+// has nothing to close. Idempotent.
 func (l *Logger) Close() error {
-	if l.f == nil {
+	if l.close == nil {
 		return nil
 	}
-	err := l.f.Close()
-	l.f = nil
+	err := l.close()
+	l.close = nil
+	l.sync = nil
 	return err
 }
 

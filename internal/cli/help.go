@@ -48,9 +48,15 @@ Display:
                              Implies --window. (default 10)
       --timestamp-format F   Display timestamp format: HH:MM:SS | rfc3339
                              (default HH:MM:SS)
+      --stdout-json          Emit the structured event stream as JSON to
+                             stdout instead of the table display
+      --stdout-csv           Emit the structured event stream as CSV to
+                             stdout instead of the table display
 
 Logging:
-  -l, --log-file PATH        Append finalized status events to PATH
+  -l, --log-file PATH        Append finalized status events to PATH.
+                             May be combined with --stdout-json or
+                             --stdout-csv to also persist the stream.
       --log-format FORMAT    Log format: csv | json (default csv)
 
 Exit codes:

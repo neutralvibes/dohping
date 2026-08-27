@@ -77,6 +77,9 @@ type Options struct {
 	LogFile   string
 	LogFormat string // csv | json
 
+	StdoutJSON bool
+	StdoutCSV  bool
+
 	TimestampFormat string // HH:MM:SS | rfc3339
 
 	Probe string // icmp | tcp[:PORT]
@@ -196,6 +199,11 @@ func Parse(args []string) (*Options, Action, error) {
 	fs.StringVar(&opts.LogFile, "log-file", "", "")
 	fs.StringVar(&opts.LogFormat, "log-format", opts.LogFormat, "")
 
+	// Structured stdout modes: replace the table display with the
+	// structured event stream on stdout (same schema as the log format).
+	fs.BoolVar(&opts.StdoutJSON, "stdout-json", false, "")
+	fs.BoolVar(&opts.StdoutCSV, "stdout-csv", false, "")
+
 	// Parse with GNU-style flag permutation: flags may appear before or
 	// after the positional HOST. Go's flag package stops at the first
 	// non-flag argument, so parse iteratively — each round consumes
@@ -278,6 +286,9 @@ func validate(opts *Options) error {
 	}
 	if opts.noLiveSet && opts.liveSet && opts.LiveMode == "on" {
 		return usageErrorf("--no-live conflicts with --live=on: remove one of them")
+	}
+	if opts.StdoutJSON && opts.StdoutCSV {
+		return usageErrorf("--stdout-json conflicts with --stdout-csv: remove one of them")
 	}
 
 	// --window-lines implies --window.

@@ -381,7 +381,7 @@ func TestHelpContent(t *testing.T) {
 		"-p, --probe", "-d, --down-after", "-u, --up-after",
 		"-q, --quiet", "--no-header", "-n, --no-color", "--color MODE", "--live MODE",
 		"--no-live", "-w, --window", "--no-window", "--window-lines",
-		"--timestamp-format", "-l, --log-file", "--log-format",
+		"--timestamp-format", "-l, --log-file", "--log-format", "--stdout-json", "--stdout-csv",
 		"Implies --window", "(default 10)",
 		"Exit codes", "130", "143", "NO_COLOR",
 	} {
@@ -389,4 +389,36 @@ func TestHelpContent(t *testing.T) {
 			t.Errorf("help missing %q", want)
 		}
 	}
+}
+
+func TestStdoutModesParse(t *testing.T) {
+	// Both flags off by default.
+	if opts := mustParse(t, "h"); opts.StdoutJSON || opts.StdoutCSV {
+		t.Errorf("defaults: StdoutJSON/StdoutCSV = %v/%v, want false/false", opts.StdoutJSON, opts.StdoutCSV)
+	}
+	// Each flag selects its mode, before or after the host.
+	opts := mustParse(t, "--stdout-json", "h")
+	if !opts.StdoutJSON || opts.StdoutCSV {
+		t.Errorf("--stdout-json: StdoutJSON/StdoutCSV = %v/%v, want true/false", opts.StdoutJSON, opts.StdoutCSV)
+	}
+	opts = mustParse(t, "h", "--stdout-csv")
+	if opts.StdoutJSON || !opts.StdoutCSV {
+		t.Errorf("--stdout-csv: StdoutJSON/StdoutCSV = %v/%v, want false/true", opts.StdoutJSON, opts.StdoutCSV)
+	}
+}
+
+func TestStdoutModesMutuallyOpposed(t *testing.T) {
+	// The two output-stream formats conflict: a clear usage error, exit 2.
+	ue := mustFail(t, "--stdout-json", "--stdout-csv", "h")
+	if !strings.Contains(ue.Error(), "stdout-json") || !strings.Contains(ue.Error(), "stdout-csv") {
+		t.Errorf("error = %q, want both flags named in the conflict", ue.Error())
+	}
+}
+
+func TestStdoutModeCompatibleFlags(t *testing.T) {
+	// --quiet is redundant with a stdout mode but not an error; a
+	// --log-file may be given alongside (display vs persistence).
+	mustParse(t, "--stdout-json", "--quiet", "h")
+	mustParse(t, "--stdout-json", "--log-file", "out.log", "h")
+	mustParse(t, "--stdout-csv", "--no-header", "h")
 }

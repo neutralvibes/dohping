@@ -1,6 +1,7 @@
 package logx
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -291,5 +292,50 @@ func TestCloseFlushes(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if !strings.Contains(string(data), ",up,") {
 		t.Errorf("entry not durable after Close: %q", data)
+	}
+}
+
+// TestNewStdoutWritesCSV verifies the stdout sink renders the exact same
+// CSV shape as the file logger: same schema, only the sink differs.
+func TestNewStdoutWritesCSV(t *testing.T) {
+	var buf bytes.Buffer
+	l := NewStdout(&buf, "csv", "142.250.190.46", "google.com")
+	if err := l.Log(upEntry()); err != nil {
+		t.Fatal(err)
+	}
+	want := "2026-08-16T11:00:35+01:00,142.250.190.46,google.com,up,2126,1.70,5.90,2.70,0\n"
+	if buf.String() != want {
+		t.Errorf("stdout csv mismatch:\n got: %q\nwant: %q", buf.String(), want)
+	}
+}
+
+// TestNewStdoutWritesJSON verifies the JSON shape is byte-identical to
+// the file logger's renderer.
+func TestNewStdoutWritesJSON(t *testing.T) {
+	var buf bytes.Buffer
+	l := NewStdout(&buf, "json", "142.250.190.46", "google.com")
+	if err := l.Log(upEntry()); err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	line := strings.TrimSpace(buf.String())
+	if err := json.Unmarshal([]byte(line), &m); err != nil {
+		t.Fatalf("stdout json not parseable: %v\n%s", err, line)
+	}
+	if m["host"] != "142.250.190.46" || m["name"] != "google.com" || m["status"] != "up" {
+		t.Errorf("stdout json fields wrong: %v", m)
+	}
+}
+
+// TestNewStdoutDoesNotOwnSink verifies a stdout logger never closes or
+// poisons its sink: Close is a no-op and the writer stays usable.
+func TestNewStdoutDoesNotOwnSink(t *testing.T) {
+	var buf bytes.Buffer
+	l := NewStdout(&buf, "csv", "h", "")
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close on a stdout logger: %v", err)
+	}
+	if _, err := buf.WriteString("still-open"); err != nil {
+		t.Errorf("sink closed by logger: %v", err)
 	}
 }

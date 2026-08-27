@@ -130,6 +130,23 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		defer func() { _ = logger.Close() }()
 	}
 
+	// Structured stdout mode: --stdout-json / --stdout-csv replace the
+	// table display with the structured event stream on stdout, reusing
+	// the log renderer with stdout as the sink. Same schema as the log
+	// format; streams for the whole run (not one-shot). A --log-file may
+	// be given alongside — the flags select the display; the log file is
+	// an independent persistence path.
+	stdoutFormat := ""
+	if opts.StdoutJSON {
+		stdoutFormat = "json"
+	} else if opts.StdoutCSV {
+		stdoutFormat = "csv"
+	}
+	var stdoutLog *logx.Logger
+	if stdoutFormat != "" {
+		stdoutLog = logx.NewStdout(stdout, stdoutFormat, pr.ResolvedAddr(), logName(opts.Host))
+	}
+
 	colorEnabled := theme.Enabled(theme.Config{NoColor: opts.NoColor, ColorMode: opts.ColorMode},
 		tty.Stdout, theme.Env{NO_COLOR: os.Getenv("NO_COLOR"), TERM: os.Getenv("TERM")})
 	th := theme.NewRenderer(colorEnabled, theme.Default)
@@ -150,13 +167,18 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		close(keyCh) // no key handling with piped stdin
 	}
 
-	// Display selection: quiet suppresses all; window mode needs
-	// a terminal (else fall back to plain mode with a warning); otherwise
-	// plain line mode.
+	// Display selection: the structured stdout modes supersede the table
+	// display entirely (the stream IS the display), so no window/plain
+	// display, header, or liveness machinery is created. Otherwise quiet
+	// suppresses all; window mode needs a terminal (else fall back to
+	// plain mode with a warning); otherwise plain line mode.
+	stdoutMode := stdoutFormat != ""
 	var disp displayer
 	var winchCh <-chan os.Signal
 	windowActive := opts.Window && tty.Stdout
-	if windowActive {
+	if stdoutMode {
+		debugx.Debugf("display", "stdout %s mode active (display superseded)", stdoutFormat)
+	} else if windowActive {
 		wd := output.NewWindow(stdout, layout, opts.WindowLines, opts.Quiet, opts.NoHeader,
 			defaultSizeFn(stdout))
 		wd.Enter()
@@ -196,7 +218,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	// second (user report 2026-08-17). Piped/quiet runs have nothing to
 	// animate — the channel stays nil and the select case never fires.
 	var tickCh <-chan time.Time
-	if !opts.Quiet && (live || windowActive) {
+	if !stdoutMode && !opts.Quiet && (live || windowActive) {
 		tick := time.NewTicker(time.Second)
 		defer tick.Stop()
 		tickCh = tick.C
@@ -218,7 +240,12 @@ loop:
 			if !ok {
 				break loop // Run finished: count exhausted or cancelled
 			}
-			disp.Handle(ev)
+			if disp != nil {
+				disp.Handle(ev)
+			}
+			if stdoutLog != nil {
+				logEvent(stdoutLog, ev)
+			}
 			if logger != nil {
 				logEvent(logger, ev)
 			}
@@ -267,16 +294,26 @@ loop:
 			// resizes there. Debug forensics: whether ConPTY → WSL2 even
 			// delivers SIGWINCH is itself a fact the log must record.
 			debugx.Debugf("winch", "SIGWINCH received → repaint")
-			disp.Tick()
+			if disp != nil {
+				disp.Tick()
+			}
 		case <-tickCh:
 			debugx.Debugf("tick", "1s tick repaint")
-			disp.Tick()
+			if disp != nil {
+				disp.Tick()
+			}
 		}
 	}
 
 	// Graceful shutdown: finalize the current display line, log the final
-	// state, print the summary (interactive only), exit predictably.
-	disp.Finalize()
+	// state (to stdout and/or the log file), print the summary
+	// (interactive only), exit predictably.
+	if disp != nil {
+		disp.Finalize()
+	}
+	if stdoutLog != nil {
+		logFinal(stdoutLog, opts.Host, eng)
+	}
 	if logger != nil {
 		logFinal(logger, opts.Host, eng)
 	}
@@ -287,7 +324,7 @@ loop:
 		_, _ = fmt.Fprintln(stderr, permissionHint())
 		return ExitProbeInit
 	}
-	if !opts.Quiet && tty.Stdout {
+	if !stdoutMode && !opts.Quiet && tty.Stdout {
 		printSummary(stdout, opts.Host, eng, time.Since(runStart))
 	}
 	return reason.exitCode()
