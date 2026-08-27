@@ -741,6 +741,24 @@ When stdin is a terminal, pressing `q` (or `Q`) triggers the same graceful shutd
 - Key reading runs in a separate goroutine and never blocks the probe loop.
 - With piped/redirected stdin there is nothing to press; no key handling occurs.
 
+### 15.5 Structured Stdout Modes
+
+`--stdout-json` and `--stdout-csv` select a structured output mode: the
+normal table display is superseded entirely, and the tool emits one
+structured event per status period to stdout instead. The data and schema
+are identical to the log format (§14) — CSV columns
+`timestamp,address,name,state,duration_seconds,min_ms,max_ms,avg_ms,fails`,
+or the JSON object per event — the only difference is the delivery stream.
+
+- The structured stream replaces the table, header, and resolution caption
+  for the whole run (it is not one-shot; it streams until the run ends).
+- `--stdout-json` and `--stdout-csv` are mutually opposed (usage error,
+  exit 2 — §16.4).
+- A `--log-file` may be given alongside: the same events are written to the
+  file too. The flags select the display; the log file is independent.
+- `--quiet` is redundant with these modes (the display is already
+  superseded) but not an error.
+
 ## 16. Command-Line Options
 
 Proposed CLI surface:
@@ -776,6 +794,8 @@ dohping [options] HOST
 | `--no-window` | Disable window mode (conflicts with `--window-lines`) | off |
 | `--window-lines N` | Number of visible lines in window mode (implies `--window`) | `10` |
 | `--timestamp-format FORMAT` | Display timestamp format | `HH:MM:SS` |
+| `--stdout-json` | Emit the structured event stream as JSON to stdout instead of the table display | off |
+| `--stdout-csv` | Emit the structured event stream as CSV to stdout instead of the table display | off |
 
 ### 16.3 Logging Options
 
@@ -789,6 +809,8 @@ dohping [options] HOST
 Mutually opposed explicit flags are a usage error: a clear message identifying the conflicting flags and exit code `2`, never silent ambiguity.
 
 Current conflicts:
+
+- `--stdout-json` × `--stdout-csv` (mutually opposed: choose one output stream format)
 
 - `--no-window` with `--window-lines`
 - `--no-color` with `--color=always`
