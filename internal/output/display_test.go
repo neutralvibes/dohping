@@ -27,7 +27,7 @@ func newTestDisplay(w *bytes.Buffer, quiet, noHeader, live bool) *Display {
 // newTestDisplaySized injects a terminal size; width drives the live
 // line's wrap bookkeeping.
 func newTestDisplaySized(w *bytes.Buffer, quiet, noHeader, live bool, width, height int) *Display {
-	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height })
+	d := NewDisplay(w, plainLayout("192.168.1.23"), "", quiet, noHeader, live, func() (int, int) { return width, height })
 	d.SetNow(func() time.Time { return t0.Add(time.Minute) })
 	return d
 }
@@ -37,7 +37,7 @@ func newTestDisplaySized(w *bytes.Buffer, quiet, noHeader, live bool, width, hei
 // redraws, and advance the clock to settle the resize freeze.
 func newTestDisplayResizable(w *bytes.Buffer, quiet, noHeader, live bool, width, height int) (*Display, *int, *int, *time.Time) {
 	now := t0.Add(time.Minute)
-	d := NewDisplay(w, plainLayout("192.168.1.23"), quiet, noHeader, live, func() (int, int) { return width, height })
+	d := NewDisplay(w, plainLayout("192.168.1.23"), "", quiet, noHeader, live, func() (int, int) { return width, height })
 	d.SetNow(func() time.Time { return now })
 	return d, &width, &height, &now
 }

@@ -20,6 +20,8 @@ func (blockingProbe) Probe(ctx context.Context) ping.Result {
 }
 func (blockingProbe) Close() error { return nil }
 
+func (blockingProbe) ResolvedAddr() string { return "" }
+
 // scriptedProbe returns a fixed sequence of results, then blocks.
 type scriptedProbe struct {
 	mu      sync.Mutex
@@ -39,6 +41,8 @@ func (p *scriptedProbe) Probe(ctx context.Context) ping.Result {
 }
 
 func (p *scriptedProbe) Close() error { return nil }
+
+func (p *scriptedProbe) ResolvedAddr() string { return "" }
 
 func TestRunCancellationStopsLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

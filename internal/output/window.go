@@ -66,6 +66,7 @@ type Window struct {
 	w        io.Writer
 	layout   *Layout
 	lines    int // visible data lines (history + live)
+	caption  string // printed once above the block for DNS name targets
 	quiet    bool
 	noHeader bool
 	sizeFn   func() (width, height int) // terminal size; 0 = unknown
@@ -88,11 +89,12 @@ type Window struct {
 // NewWindow builds a window display. lines is the visible data-line count
 // (--window-lines); sizeFn returns the terminal size in cells (0 =
 // unknown → startup column policy, full configured window height).
-func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, sizeFn func() (width, height int)) *Window {
+func NewWindow(w io.Writer, layout *Layout, lines int, caption string, quiet, noHeader bool, sizeFn func() (width, height int)) *Window {
 	return &Window{
 		w:        w,
 		layout:   layout,
 		lines:    lines,
+		caption:  caption,
 		quiet:    quiet,
 		noHeader: noHeader,
 		sizeFn:   sizeFn,
@@ -103,9 +105,15 @@ func NewWindow(w io.Writer, layout *Layout, lines int, quiet, noHeader bool, siz
 // SetNow overrides the clock (test injection).
 func (w *Window) SetNow(f func() time.Time) { w.now = f }
 
-// Enter is a no-op: the window renders in place on the normal terminal and
-// takes over no screen state, so there is nothing to enter.
-func (w *Window) Enter() {}
+// Enter prints the resolution caption once above the block. The window
+// renders in place on the normal terminal and takes over no screen state,
+// so this is the only write at entry: the caption lands in scrollback
+// above the block and is never part of the block's redraw math.
+func (w *Window) Enter() {
+	if w.caption != "" && !w.noHeader && !w.quiet {
+		_, _ = fmt.Fprintln(w.w, w.caption)
+	}
+}
 
 // Exit is a no-op for the same reason: the block is left visible on the
 // normal screen (like plain line mode leaves its lines) and the terminal

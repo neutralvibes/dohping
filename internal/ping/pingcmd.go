@@ -94,6 +94,9 @@ func (p *pingCmdProbe) Probe(ctx context.Context) Result {
 // Close is a no-op (no persistent resource).
 func (p *pingCmdProbe) Close() error { return nil }
 
+// ResolvedAddr returns the resolved target address in canonical form.
+func (p *pingCmdProbe) ResolvedAddr() string { return p.ip.String() }
+
 // pingWaitSeconds maps the probe timeout to ping's -W (whole seconds,
 // minimum 1).
 func pingWaitSeconds(d time.Duration) int {

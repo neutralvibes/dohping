@@ -45,6 +45,9 @@ func (p *TCPProbe) Probe(ctx context.Context) Result {
 // Close is a no-op for TCP probes (no persistent socket).
 func (p *TCPProbe) Close() error { return nil }
 
+// ResolvedAddr returns the resolved target address in canonical form.
+func (p *TCPProbe) ResolvedAddr() string { return p.addr.IP.String() }
+
 // classifyDialError maps a dial error to the probe contract. Exposed for
 // deterministic unit testing.
 func classifyDialError(err error, rtt time.Duration) Result {

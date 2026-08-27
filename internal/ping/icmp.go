@@ -88,7 +88,7 @@ func NewICMPProbe(host string, timeout time.Duration) (Probe, error) {
 		return nil, fmt.Errorf("unable to create ICMP socket: %w", socketErr)
 	}
 	debugx.Debugf("probe", "ICMP fallback chain: %d tier(s), starting on %q", len(tiers), tiers[0].name)
-	return &fallbackProbe{tiers: tiers}, nil
+	return &fallbackProbe{tiers: tiers, resolved: ip.IP.String()}, nil
 }
 
 func newICMPProbe(conn *icmp.PacketConn, ip net.IP, isV6 bool, timeout time.Duration) *ICMPProbe {
@@ -178,6 +178,9 @@ func (p *ICMPProbe) Close() error {
 	p.conn = nil
 	return err
 }
+
+// ResolvedAddr returns the resolved target address in canonical form.
+func (p *ICMPProbe) ResolvedAddr() string { return p.ip.String() }
 
 func protoNum(v6 bool) int {
 	if v6 {
