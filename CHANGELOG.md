@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `--stdout-json` and `--stdout-csv`: skip the table display and stream
+  one structured event per status period to stdout, in the same schema
+  as the log format. May be combined with `--log-file`.
+
+### Changed
+- Logs now record the resolved IP in the address/host column and add a
+  separate name field: `dohping example.com` and `dohping 1.2.3.4`
+  produce the same columns, differing only in the name cell.
+
 ## [0.1.3] - 2026-08-26
 
 ### Fixed

@@ -8,8 +8,8 @@ import (
 
 // ResolvedAddr accessor tests: every probe implementation reports the
 // canonical IP it resolved at construction — the single source of truth
-// for the display's resolution caption (SPEC §6.1). A wrong accessor
-// would show an address the probes never used.
+// for the display's resolution caption and the log's address column. A
+// wrong accessor would show or record an address the probes never used.
 
 func TestICMPProbeResolvedAddr(t *testing.T) {
 	p := newICMPProbe(nil, net.ParseIP("127.0.0.1"), false, 0)

@@ -45,8 +45,10 @@ type Probe interface {
 	Close() error
 	// ResolvedAddr returns the IP address the target resolved to at
 	// construction, in canonical form (dotted quad for IPv4, colon form
-	// for IPv6). The display shows it in the resolution caption so the
-	// address on screen is exactly the one the probes use.
+	// for IPv6). Consumers that must show or record the address the
+	// probes actually use (the resolution caption, the log's address
+	// column) call this rather than re-resolving, because a second
+	// resolution can differ (round-robin DNS).
 	ResolvedAddr() string
 }
 

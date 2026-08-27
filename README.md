@@ -293,21 +293,45 @@ A fixed block of the most recent lines plus the current live line, drawn in plac
 
 > Resize handling works across Windows Terminal, Terminal.app, and iTerm2. See [docs/terminal-rendering.md](docs/terminal-rendering.md) if you want to know how it works.
 
+### Structured stdout modes
+
+`--stdout-json` and `--stdout-csv` skip the table display entirely and
+stream one structured event per status period to stdout instead, using
+the same schema as the log format. The stream runs for the whole
+session, so a script sees the same live events a monitoring session
+would. Nothing else goes to stdout: no header, no caption, no summary.
+
+```json
+{"time":"2026-08-16T12:15:00+01:00","host":"142.250.190.46","name":"google.com","status":"up","duration_seconds":300,"min_ms":2.1,"max_ms":3.4,"avg_ms":2.7,"fails":0}
+```
+
+```
+2026-08-16T12:15:00+01:00,142.250.190.46,google.com,up,300,2.10,3.40,2.70,0
+```
+
+The two flags conflict with each other: pick one output format.
+`--log-file` may be combined with either, since the flags select the
+display and the log file stays independent.
+
 ## Logging
 
-`--log-file PATH` appends one line per finalized status event. Logging is independent of `--quiet`.
+`--log-file PATH` appends one line per finalized status event. Logging is independent of `--quiet`. The log has the same columns whether the target was given as a name or an IP literal. `address` is always the resolved IP the probes used, and `name` is the hostname you gave (empty when you gave an IP literal). The structured stdout modes above reuse this exact format.
 
 **CSV:**
 
 ```text
-2026-08-16T11:00:35+01:00,192.168.1.23,up,2126,1.70,5.90,2.70,0
-2026-08-16T11:05:23+01:00,192.168.1.23,down,65,,,,23
+2026-08-16T11:00:35+01:00,192.168.1.23,,up,2126,1.70,5.90,2.70,0
+2026-08-16T11:05:23+01:00,192.168.1.23,,down,65,,,,23
+2026-08-16T12:15:00+01:00,142.250.190.46,google.com,up,300,2.10,3.40,2.70,0
 ```
+
+Columns: `timestamp,address,name,state,duration_seconds,min_ms,max_ms,avg_ms,fails`. The `name` column is always present. It is empty when you pinged an IP address directly.
 
 **JSON:**
 
 ```json
-{"time":"2026-08-16T11:00:35+01:00","host":"192.168.1.23","status":"up","duration_seconds":2126,"min_ms":1.7,"max_ms":5.9,"avg_ms":2.7,"fails":0}
+{"time":"2026-08-16T11:00:35+01:00","host":"192.168.1.23","name":"","status":"up","duration_seconds":2126,"min_ms":1.7,"max_ms":5.9,"avg_ms":2.7,"fails":0}
+{"time":"2026-08-16T12:15:00+01:00","host":"142.250.190.46","name":"google.com","status":"up","duration_seconds":300,"min_ms":2.1,"max_ms":3.4,"avg_ms":2.7,"fails":0}
 ```
 
 ## Development
