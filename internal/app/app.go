@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"syscall"
 	"time"
@@ -121,7 +122,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	// Log file: a failure to open is a clean error, never silent loss.
 	var logger *logx.Logger
 	if opts.LogFile != "" {
-		logger, err = logx.Open(opts.LogFile, opts.LogFormat, opts.Host)
+		logger, err = logx.Open(opts.LogFile, opts.LogFormat, pr.ResolvedAddr(), logName(opts.Host))
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "dohping: unable to open log file %q: %v\n", opts.LogFile, err)
 			return ExitError
@@ -364,6 +365,17 @@ func startKeyReader(f *os.File, out chan<- keyEvent) (restore func(), err error)
 		}
 	}()
 	return restore, nil
+}
+
+// logName is the log's name column for a target: the DNS name when the
+// target was given as one, empty when it was an IP literal (the address
+// column carries the resolved IP either way, so both runs share one log
+// shape).
+func logName(host string) string {
+	if net.ParseIP(host) != nil {
+		return ""
+	}
+	return host
 }
 
 // logEvent logs the state that just ended, if it is a real status period

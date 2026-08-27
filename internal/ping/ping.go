@@ -43,6 +43,12 @@ type Result struct {
 type Probe interface {
 	Probe(ctx context.Context) Result
 	Close() error
+	// ResolvedAddr returns the canonical IP the target resolved to at
+	// construction (dotted quad for IPv4, colon form for IPv6).
+	// Consumers that must show or record the address the probes actually
+	// use call this rather than re-resolving, because a second
+	// resolution can differ (round-robin DNS).
+	ResolvedAddr() string
 }
 
 // IsPermissionError reports whether err is a permission-class failure
