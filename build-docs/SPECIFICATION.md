@@ -370,6 +370,9 @@ The preferred column set is:
 TIME HOST STATE DURATION MIN MAX AVG FAILS
 ```
 
+The log file uses its own column set (see §14); the display columns above are
+unaffected by the log schema.
+
 ### 9.1 Column Definitions
 
 | Column | Meaning |
@@ -609,9 +612,9 @@ At minimum, each log event should include:
 ### 14.3 Log Format
 
 The plain (text) log format is CSV: one status event per line, comma-separated
-columns, address before state, duration in raw seconds, and unavailable fields
-left as empty cells. It is machine-readable (a CSV parser reads empty cells as
-"not applicable") while remaining human-friendly.
+columns, address before name, then state, duration in raw seconds, and
+unavailable fields left as empty cells. It is machine-readable (a CSV parser
+reads empty cells as "not applicable") while remaining human-friendly.
 
 Default log format:
 
@@ -640,19 +643,23 @@ Default:
 ### 14.4 CSV Log Example
 
 ```text
-2026-08-16T11:00:35+01:00,192.168.1.23,up,2126,1.70,5.90,2.70,0
-2026-08-16T11:05:23+01:00,192.168.1.23,down,65,,,,23
-2026-08-16T13:34:11+01:00,192.168.1.23,up,175226,1.00,2.50,1.70,0
+2026-08-16T11:00:35+01:00,192.168.1.23,,up,2126,1.70,5.90,2.70,0
+2026-08-16T11:05:23+01:00,192.168.1.23,,down,65,,,,23
+2026-08-16T13:34:11+01:00,192.168.1.23,,up,175226,1.00,2.50,1.70,0
 ```
 
 Columns, in order:
 
 ```text
-timestamp,address,state,duration_seconds,min_ms,max_ms,avg_ms,fails
+timestamp,address,name,state,duration_seconds,min_ms,max_ms,avg_ms,fails
 ```
 
 - `timestamp`: RFC 3339 time the status began.
-- `address`: target host, IPv6 literals bracketed (`[::1]`).
+- `address`: the resolved IP address the probes use, IPv6 literals bracketed
+  (`[::1]`). Always the canonical IP — whether the target was given as a name
+  or a literal.
+- `name`: the DNS name when the target was given as one; empty (an empty
+  cell) when the target was an IP literal. Always present as a column.
 - `state`: `up`, `down`, `?` (not yet established), or `error`.
 - `duration_seconds`: whole seconds spent in the status.
 - `min_ms`, `max_ms`, `avg_ms`: RTT in milliseconds, two decimals, present only
@@ -662,10 +669,14 @@ timestamp,address,state,duration_seconds,min_ms,max_ms,avg_ms,fails
 ### 14.5 JSON Log Example
 
 ```json
-{"time":"2026-08-16T11:00:35+01:00","host":"192.168.1.23","status":"up","duration_seconds":2126,"min_ms":1.70,"max_ms":5.90,"avg_ms":2.70,"fails":0}
-{"time":"2026-08-16T11:05:23+01:00","host":"192.168.1.23","status":"down","duration_seconds":65,"fails":23}
-{"time":"2026-08-16T13:34:11+01:00","host":"192.168.1.23","status":"up","duration_seconds":175226,"min_ms":1.00,"max_ms":2.50,"avg_ms":1.70,"fails":0}
+{"time":"2026-08-16T11:00:35+01:00","host":"192.168.1.23","name":"","status":"up","duration_seconds":2126,"min_ms":1.70,"max_ms":5.90,"avg_ms":2.70,"fails":0}
+{"time":"2026-08-16T11:05:23+01:00","host":"192.168.1.23","name":"","status":"down","duration_seconds":65,"fails":23}
+{"time":"2026-08-16T13:34:11+01:00","host":"192.168.1.23","name":"","status":"up","duration_seconds":175226,"min_ms":1.00,"max_ms":2.50,"avg_ms":1.70,"fails":0}
 ```
+
+The JSON `host` field carries the resolved IP (as the CSV `address` column),
+and `name` carries the DNS name when given, always present (empty string
+otherwise).
 
 ### 14.6 Logging Rules
 
