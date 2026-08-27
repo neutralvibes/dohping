@@ -29,8 +29,9 @@ type fallbackTier struct {
 // tier to spawning the ping command on every interval. Once escalated,
 // the new tier is sticky for the rest of the run.
 type fallbackProbe struct {
-	tiers []*fallbackTier
-	cur   int
+	tiers    []*fallbackTier
+	cur      int
+	resolved string // resolved target address, shared by every tier
 }
 
 // Probe runs the active tier, escalating through the chain until one
@@ -76,3 +77,7 @@ func (f *fallbackProbe) Close() error {
 	}
 	return nil
 }
+
+// ResolvedAddr returns the resolved target address. The host is resolved
+// once at construction, so every tier shares the same address.
+func (f *fallbackProbe) ResolvedAddr() string { return f.resolved }

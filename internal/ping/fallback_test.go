@@ -30,6 +30,8 @@ func (s *stubProbe) Close() error {
 	return nil
 }
 
+func (s *stubProbe) ResolvedAddr() string { return "" }
+
 func stubTier(name string, results ...Result) *fallbackTier {
 	return &fallbackTier{name: name, probe: &stubProbe{results: results}}
 }

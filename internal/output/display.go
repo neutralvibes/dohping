@@ -51,6 +51,7 @@ import (
 type Display struct {
 	w        io.Writer
 	layout   *Layout
+	caption  string // printed once above the header for DNS name targets
 	quiet    bool
 	noHeader bool
 	live     bool
@@ -69,10 +70,11 @@ type Display struct {
 // NewDisplay builds a display. live controls in-place updating (decided
 // by the caller from --live/--no-live and TTY state). sizeFn returns the
 // terminal size (0 = unknown → never wrap); nil means never wrap.
-func NewDisplay(w io.Writer, layout *Layout, quiet, noHeader, live bool, sizeFn func() (width, height int)) *Display {
+func NewDisplay(w io.Writer, layout *Layout, caption string, quiet, noHeader, live bool, sizeFn func() (width, height int)) *Display {
 	return &Display{
 		w:        w,
 		layout:   layout,
+		caption:  caption,
 		quiet:    quiet,
 		noHeader: noHeader,
 		live:     live,
@@ -92,6 +94,9 @@ func (d *Display) Handle(ev state.Event) {
 	if !d.started {
 		d.started = true
 		if !d.noHeader {
+			if d.caption != "" {
+				d.printLine(d.caption)
+			}
 			d.printLine(d.layout.Header())
 		}
 	}

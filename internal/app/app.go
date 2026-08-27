@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"syscall"
 	"time"
@@ -149,6 +150,12 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		close(keyCh) // no key handling with piped stdin
 	}
 
+	// Resolution caption: when the target is a DNS name that resolved to an
+	// IP, the display shows it once above the header (ping style). The
+	// probe's own resolved address is the single source of truth — a
+	// separate re-resolution could differ (round-robin DNS).
+	caption := resolutionCaption(opts.Host, pr.ResolvedAddr())
+
 	// Display selection: quiet suppresses all; window mode needs
 	// a terminal (else fall back to plain mode with a warning); otherwise
 	// plain line mode.
@@ -156,7 +163,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 	var winchCh <-chan os.Signal
 	windowActive := opts.Window && tty.Stdout
 	if windowActive {
-		wd := output.NewWindow(stdout, layout, opts.WindowLines, opts.Quiet, opts.NoHeader,
+		wd := output.NewWindow(stdout, layout, opts.WindowLines, caption, opts.Quiet, opts.NoHeader,
 			defaultSizeFn(stdout))
 		wd.Enter()
 		defer wd.Exit()
@@ -169,7 +176,7 @@ func Main(args []string, stdout, stderr io.Writer, tty TTY) int {
 		if opts.Window && !opts.Quiet {
 			_, _ = fmt.Fprintln(stderr, "dohping: warning: --window requires a terminal; falling back to plain line mode")
 		}
-		disp = output.NewDisplay(stdout, layout, opts.Quiet, opts.NoHeader, live,
+		disp = output.NewDisplay(stdout, layout, caption, opts.Quiet, opts.NoHeader, live,
 			defaultSizeFn(stdout))
 		debugx.Debugf("display", "plain mode active (live=%v)", live)
 		if live {
@@ -424,6 +431,16 @@ func printSummary(w io.Writer, host string, eng *state.Engine, runDuration time.
 
 func formatRunDuration(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d:%02d", int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60)
+}
+
+// resolutionCaption builds the ping-style caption line for a DNS name
+// target that resolved to an IP, or "" when the target is an IP literal
+// (the address is already visible in the HOST column) or nothing resolved.
+func resolutionCaption(host, resolved string) string {
+	if host == "" || resolved == "" || net.ParseIP(host) != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s -> %s", host, resolved)
 }
 
 // buildProbe constructs the configured probe type.
