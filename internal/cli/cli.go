@@ -136,6 +136,71 @@ func usageErrorf(format string, a ...any) error {
 	return &UsageError{msg: fmt.Sprintf(format, a...)}
 }
 
+// flagErrorSuggest inspects a flag-package parse error for an unknown flag
+// and returns the offending name (no dashes) plus, when a close known flag
+// exists, that flag's long name (no dashes). Returns ("", "") when the
+// error is not an unknown-flag error, or when nothing is close enough.
+func flagErrorSuggest(err error, fs *flag.FlagSet) (unknown, suggestion string) {
+	const prefix = "flag provided but not defined: -"
+	msg := err.Error()
+	if !strings.HasPrefix(msg, prefix) {
+		return "", ""
+	}
+	unknown = strings.TrimPrefix(msg, prefix)
+	// A --flag=value form can leave a trailing =value; keep only the name.
+	if i := strings.IndexByte(unknown, '='); i >= 0 {
+		unknown = unknown[:i]
+	}
+	// Suggest only within a small edit distance; the set of known flags is
+	// derived from the flag set itself so it stays in sync with new flags.
+	const maxDist = 3
+	best, bestDist := "", maxDist+1
+	fs.VisitAll(func(f *flag.Flag) {
+		// Skip single-character short forms: a bogus one-char flag is
+		// distance-1 from every short flag, so including them would guess
+		// randomly. Long forms carry the real suggestions.
+		if len(f.Name) < 2 {
+			return
+		}
+		if d := levenshtein(unknown, f.Name); d < bestDist {
+			best, bestDist = f.Name, d
+		}
+	})
+	if bestDist > maxDist {
+		return unknown, ""
+	}
+	return unknown, best
+}
+
+// levenshtein returns the edit distance (insert/delete/substitute) between
+// two strings — the classic Wagner-Fischer DP, O(m·n).
+func levenshtein(a, b string) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+	prev := make([]int, lb+1)
+	cur := make([]int, lb+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= la; i++ {
+		cur[0] = i
+		for j := 1; j <= lb; j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[lb]
+}
+
 // Parse parses args (without the program name), validates them, and returns
 // the resulting options plus the action the caller must take.
 //
@@ -218,6 +283,12 @@ func Parse(args []string) (*Options, Action, error) {
 		if err := fs.Parse(rest); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return opts, ActionHelp, nil
+			}
+			if name, sug := flagErrorSuggest(err, fs); name != "" {
+				if sug != "" {
+					return nil, ActionRun, usageErrorf("unknown flag: --%s\ndid you mean --%s?", name, sug)
+				}
+				return nil, ActionRun, usageErrorf("unknown flag: --%s", name)
 			}
 			return nil, ActionRun, usageErrorf("%v", err)
 		}

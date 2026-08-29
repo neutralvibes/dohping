@@ -32,6 +32,59 @@ func mustFail(t *testing.T, args ...string) *UsageError {
 	return ue
 }
 
+func TestUnknownFlagSuggestsCloseMatch(t *testing.T) {
+	// A typo close to a real flag suggests the flag (the user's exact case
+	// — --std-out-json → --stdout-json — lives on the feature branch that
+	// adds --stdout-json; here the same shape with a master flag).
+	ue := mustFail(t, "--quite", "192.168.1.220")
+	if !strings.Contains(ue.msg, "unknown flag: --quite") {
+		t.Errorf("msg = %q, want 'unknown flag: --quite'", ue.msg)
+	}
+	if !strings.Contains(ue.msg, "did you mean --quiet?") {
+		t.Errorf("msg = %q, want 'did you mean --quiet?'", ue.msg)
+	}
+}
+
+func TestUnknownFlagSuggestsOtherTypos(t *testing.T) {
+	cases := []struct {
+		flag string // dashless long name, e.g. "no-colr"
+		want string
+	}{
+		{"no-colr", "no-color"}, // missing char
+		{"quite", "quiet"},      // transposition-ish
+		{"wndow", "window"},     // missing char
+	}
+	for _, c := range cases {
+		ue := mustFail(t, "--"+c.flag, "host")
+		if !strings.Contains(ue.msg, "unknown flag: --"+c.flag) {
+			t.Errorf("%s: msg = %q, want 'unknown flag: --%s'", c.flag, ue.msg, c.flag)
+		}
+		if !strings.Contains(ue.msg, "did you mean --"+c.want+"?") {
+			t.Errorf("%s: msg = %q, want suggestion '--%s'", c.flag, ue.msg, c.want)
+		}
+	}
+}
+
+func TestUnknownFlagNoSuggestionWhenFar(t *testing.T) {
+	// Nothing close: no guess, but still plain 'unknown flag' wording.
+	ue := mustFail(t, "--zzzzz", "host")
+	if !strings.Contains(ue.msg, "unknown flag: --zzzzz") {
+		t.Errorf("msg = %q, want 'unknown flag: --zzzzz'", ue.msg)
+	}
+	if strings.Contains(ue.msg, "did you mean") {
+		t.Errorf("msg = %q, want no 'did you mean' for a far flag", ue.msg)
+	}
+}
+
+func TestUnknownShortFlagNoRandomGuess(t *testing.T) {
+	// A bogus one-char flag must not guess at any short flag (they're all
+	// distance-1 from each other).
+	ue := mustFail(t, "-z", "host")
+	if strings.Contains(ue.msg, "did you mean") {
+		t.Errorf("msg = %q, want no guess for a bogus short flag", ue.msg)
+	}
+}
+
 func TestParseDefaults(t *testing.T) {
 	opts := mustParse(t, "192.168.1.23")
 	if opts.Host != "192.168.1.23" {
