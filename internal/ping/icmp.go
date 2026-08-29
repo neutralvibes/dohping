@@ -15,11 +15,19 @@ import (
 	"dohping/internal/debugx"
 )
 
-// ICMPProbe sends ICMP echo requests over a privileged raw socket
-// (CAP_NET_RAW on Linux; admin on Windows). ICMPv6 is used automatically
-// for IPv6 targets.
+// ICMPProbe sends ICMP echo requests over a raw ICMP socket. ICMPv6 is used
+// automatically for IPv6 targets.
+//
+// The probe is STATELESS with respect to its transport: it resolves the
+// target once at construction (the stable-address contract) and opens a
+// FRESH socket for every Probe() call, closing it when the probe
+// completes. No socket is held across probes — a socket that goes stale
+// after a network shift (opens but silently stops delivering replies) can
+// therefore affect at most one probe; the next probe starts clean. The
+// ICMP identity (ID and sequence) lives on the probe object so it stays
+// continuous across the fresh sockets.
 type ICMPProbe struct {
-	conn    *icmp.PacketConn
+	network string // "ip4:icmp"/"ip6:ipv6-icmp" (raw) or "udp4"/"udp6" (ping socket)
 	ip      net.IP
 	id      int
 	seq     int
@@ -40,10 +48,11 @@ type ICMPProbe struct {
 //  3. the system ping command (works in restricted environments where
 //     /bin/ping is elevated but the process holds no privileges).
 //
-// The result is a fallbackProbe that escalates through the tiers when the
-// active one fails (see fallback.go). The system ping tier stays in the
-// chain even when a socket opened, because a socket can open and still
-// fail every probe — the fallback covers that by escalating to ping.
+// Tier availability is probed ONCE here (each probe socket is opened and
+// immediately closed); every Probe() then opens its own fresh socket of
+// the tier's network type. The system ping tier stays in the chain even
+// when a socket opened, because a socket can open and still fail every
+// probe — the fallback covers that by escalating to ping.
 //
 // When every tier is unavailable, the error carries the socket permission
 // failure so callers can print helpful guidance.
@@ -64,14 +73,16 @@ func NewICMPProbe(host string, timeout time.Duration) (Probe, error) {
 	var socketErr error
 	// Tier 1: privileged raw socket.
 	if conn, e := icmp.ListenPacket(rawNet, ""); e == nil {
-		tiers = append(tiers, &fallbackTier{name: "raw socket", probe: newICMPProbe(conn, ip.IP, isV6, timeout)})
+		_ = conn.Close() // availability check only; Probe() opens fresh
+		tiers = append(tiers, &fallbackTier{name: "raw socket", probe: newICMPProbe(rawNet, ip.IP, isV6, timeout)})
 	} else {
 		socketErr = e
 		debugx.Debugf("probe", "tier raw socket unavailable: %v", e)
 	}
 	// Tier 2: unprivileged ping socket.
 	if conn, e := icmp.ListenPacket(unprivNet, ""); e == nil {
-		tiers = append(tiers, &fallbackTier{name: "ping socket", probe: newICMPProbe(conn, ip.IP, isV6, timeout)})
+		_ = conn.Close() // availability check only; Probe() opens fresh
+		tiers = append(tiers, &fallbackTier{name: "ping socket", probe: newICMPProbe(unprivNet, ip.IP, isV6, timeout)})
 	} else {
 		if socketErr == nil {
 			socketErr = e
@@ -91,9 +102,9 @@ func NewICMPProbe(host string, timeout time.Duration) (Probe, error) {
 	return &fallbackProbe{tiers: tiers}, nil
 }
 
-func newICMPProbe(conn *icmp.PacketConn, ip net.IP, isV6 bool, timeout time.Duration) *ICMPProbe {
+func newICMPProbe(network string, ip net.IP, isV6 bool, timeout time.Duration) *ICMPProbe {
 	return &ICMPProbe{
-		conn:    conn,
+		network: network,
 		ip:      ip,
 		id:      os.Getpid() & 0xffff,
 		timeout: timeout,
@@ -101,8 +112,19 @@ func newICMPProbe(conn *icmp.PacketConn, ip net.IP, isV6 bool, timeout time.Dura
 	}
 }
 
-// Probe sends one echo request and waits for the matching reply.
+// Probe opens a fresh socket, sends one echo request, and waits for the
+// matching reply. The socket is created and released within this call, so
+// no connection state survives between probes.
 func (p *ICMPProbe) Probe(ctx context.Context) Result {
+	conn, err := icmp.ListenPacket(p.network, "")
+	if err != nil {
+		// A fresh socket that cannot be created is operational, not a
+		// host-down condition (the fallback may escalate a never-worked
+		// tier).
+		return Result{Outcome: OutcomeError, Err: fmt.Errorf("open ICMP socket: %w", err)}
+	}
+	defer func() { _ = conn.Close() }()
+
 	p.seq++
 	var typ icmp.Type
 	if p.isV6 {
@@ -121,7 +143,7 @@ func (p *ICMPProbe) Probe(ctx context.Context) Result {
 	}
 
 	start := time.Now()
-	if _, err := p.conn.WriteTo(wire, &net.IPAddr{IP: p.ip}); err != nil {
+	if _, err := conn.WriteTo(wire, &net.IPAddr{IP: p.ip}); err != nil {
 		// A write failure after a successful socket open is operational
 		// (e.g. network unreachable reported by the stack).
 		return Result{Outcome: OutcomeError, Err: fmt.Errorf("write ICMP echo: %w", err)}
@@ -131,7 +153,7 @@ func (p *ICMPProbe) Probe(ctx context.Context) Result {
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl
 	}
-	if err := p.conn.SetReadDeadline(deadline); err != nil {
+	if err := conn.SetReadDeadline(deadline); err != nil {
 		return Result{Outcome: OutcomeError, Err: fmt.Errorf("set ICMP read deadline: %w", err)}
 	}
 
@@ -139,7 +161,7 @@ func (p *ICMPProbe) Probe(ctx context.Context) Result {
 	// (raw sockets receive unrelated ICMP traffic).
 	buf := make([]byte, 1500)
 	for {
-		n, peer, err := p.conn.ReadFrom(buf)
+		n, peer, err := conn.ReadFrom(buf)
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
@@ -169,15 +191,12 @@ func (p *ICMPProbe) Probe(ctx context.Context) Result {
 	}
 }
 
-// Close releases the ICMP socket.
-func (p *ICMPProbe) Close() error {
-	if p.conn == nil {
-		return nil
-	}
-	err := p.conn.Close()
-	p.conn = nil
-	return err
-}
+// Close is a no-op: the probe holds no persistent socket between probes.
+// Kept to satisfy the Probe interface (the fallback chain calls it).
+func (p *ICMPProbe) Close() error { return nil }
+
+// ResolvedAddr returns the resolved target address in canonical form.
+func (p *ICMPProbe) ResolvedAddr() string { return p.ip.String() }
 
 func protoNum(v6 bool) int {
 	if v6 {

@@ -39,6 +39,35 @@ func TestICMPProbeLoopback(t *testing.T) {
 	}
 }
 
+// TestICMPProbeSurvivesClose pins the stateless lifecycle: the probe holds
+// NO transport between probes, so calling Close() (a no-op today) must not
+// break the next Probe(). A held-socket design would crash or error here.
+// Regression for the fresh-transport-per-probe lifecycle.
+func TestICMPProbeSurvivesClose(t *testing.T) {
+	pr, err := NewICMPProbe("127.0.0.1", time.Second)
+	if err != nil {
+		t.Fatalf("NewICMPProbe: %v", err)
+	}
+	defer func() { _ = pr.Close() }()
+
+	// Establish a clean result first.
+	if r := pr.Probe(context.Background()); r.Outcome != OutcomeUp {
+		t.Fatalf("first probe = %v, want up (err=%v)", r.Outcome, r.Err)
+	}
+	// Close (no-op: no held socket to close), then probe again — the next
+	// probe opens a fresh transport and must still report up.
+	if err := pr.Close(); err != nil {
+		t.Fatalf("Close = %v, want nil", err)
+	}
+	r := pr.Probe(context.Background())
+	if r.Outcome != OutcomeUp {
+		t.Fatalf("probe after Close = %v, want up (err=%v)", r.Outcome, r.Err)
+	}
+	if r.RTT <= 0 {
+		t.Errorf("RTT after Close = %v, want > 0", r.RTT)
+	}
+}
+
 // TestICMPFallbackEngagesPingCommand asserts that in environments without
 // ICMP sockets, the ping-command tier is used (so the default probe still
 // works instead of failing with a permission error).
