@@ -841,6 +841,23 @@ error: unable to create ICMP socket: permission denied
 hint: run with elevated privileges or grant CAP_NET_RAW
 ```
 
+### 19.1 Unknown Flags
+
+An unknown flag is a usage error (exit 2), reported with a plain-language
+message and, when a close match exists, a suggestion:
+
+```text
+dohping: unknown flag: --std-out-json
+did you mean --stdout-json?
+run 'dohping --help' for usage
+```
+
+The suggestion is computed by edit distance against the set of known flags
+(derived from the flag set itself, so adding a flag automatically extends
+the matcher). A suggestion is offered only when the closest match is within
+a small distance (a few edits); otherwise the message stands alone with no
+guess. The known flags always carry their long form (`--flag`).
+
 Errors should not cause panics in normal operation.
 
 ## 20. Engineering Requirements
