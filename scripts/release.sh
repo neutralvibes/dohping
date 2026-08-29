@@ -4,10 +4,9 @@
 # Reproducible: -trimpath + no VCS stamping; the same source + Go version
 # yields byte-identical binaries. Version is injected via ldflags.
 #
-# Release builds are stripped (-s -w): the symbol table and DWARF debug info
-# are dropped for smaller downloads and less for antivirus heuristics to
-# pattern-match. Stripping is standard for release binaries; dev builds keep
-# debug info for readable crash traces.
+# Release builds are stripped (-s -w) to reduce download size and omit
+# debug/symbol information. Development builds retain debug information
+# for readable crash traces.
 #
 # Packaging: each target ships as a compressed archive named
 #   dohping_<version>_<os>_<arch>.tar.gz    (unix: gzip, exec bit set)
