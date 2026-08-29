@@ -267,7 +267,7 @@ loop:
 				disp.Handle(ev)
 			}
 			if stdoutLog != nil {
-				logEvent(stdoutLog, ev)
+				logEventLive(stdoutLog, ev)
 			}
 			if logger != nil {
 				logEvent(logger, ev)
@@ -442,6 +442,40 @@ func logName(host string) string {
 // (up/down/error). The initial unknown→X transition has nothing to log.
 func logEvent(l *logx.Logger, ev state.Event) {
 	if ev.Kind != state.EventStatusChange && ev.Kind != state.EventError {
+		return
+	}
+	if ev.PrevStatus != state.StatusUp && ev.PrevStatus != state.StatusDown && ev.PrevStatus != state.StatusError {
+		return
+	}
+	_ = l.Log(logx.Entry{
+		Time:     ev.Time,
+		Status:   ev.PrevStatus,
+		Duration: ev.Duration,
+		Fails:    ev.Fails,
+		Stats:    ev.PrevStats,
+	})
+}
+
+// logEventLive logs a status event for the structured stdout stream. The
+// stream IS the live display, so unlike the log file — which records only
+// COMPLETED periods — it also announces the initial establishment of status
+// the moment it happens (unknown → up/down/error), matching the live table's
+// current line appearing on screen. Confirmed flips between established
+// states finalize the ended period exactly as the log file does.
+func logEventLive(l *logx.Logger, ev state.Event) {
+	if ev.Kind != state.EventStatusChange && ev.Kind != state.EventError {
+		return
+	}
+	if ev.PrevStatus == state.StatusUnknown {
+		// Establishment at startup: announce the new status with a fresh
+		// duration (the period has just begun).
+		_ = l.Log(logx.Entry{
+			Time:     ev.Time,
+			Status:   ev.Status,
+			Duration: 0,
+			Fails:    0,
+			Stats:    ev.Stats,
+		})
 		return
 	}
 	if ev.PrevStatus != state.StatusUp && ev.PrevStatus != state.StatusDown && ev.PrevStatus != state.StatusError {

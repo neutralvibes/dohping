@@ -24,8 +24,9 @@ func startLocalListener(t *testing.T) (host string, port int, close func()) {
 
 // TestStdoutJSONReplacesDisplay runs a short TCP-probe session with
 // --stdout-json and asserts the table display is superseded entirely:
-// stdout carries exactly one parseable JSON event (the final state at
-// shutdown), and nothing else — no column header, no summary, no caption.
+// stdout carries exactly two parseable JSON events — the establishment
+// announcement (unknown → up, the live line appearing) and the final state
+// at shutdown — and nothing else (no column header, no summary, no caption).
 func TestStdoutJSONReplacesDisplay(t *testing.T) {
 	host, port, close := startLocalListener(t)
 	defer close()
@@ -46,26 +47,40 @@ func TestStdoutJSONReplacesDisplay(t *testing.T) {
 		t.Errorf("exit summary leaked into stdout stream: %q", out.String())
 	}
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("stdout lines = %d, want exactly 1 (the final event): %q", len(lines), out.String())
+	// Two events for a stable run: the establishment announcement (the live
+	// line appearing — the stream must not wait for shutdown) and the final
+	// record. Both must be up.
+	if len(lines) != 2 {
+		t.Fatalf("stdout lines = %d, want exactly 2 (establishment + final): %q", len(lines), out.String())
 	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &m); err != nil {
-		t.Fatalf("stdout line not JSON: %v\n%s", err, lines[0])
+	for i, ln := range lines {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(ln), &m); err != nil {
+			t.Fatalf("stdout line %d not JSON: %v\n%s", i, err, ln)
+		}
+		if m["host"] != "127.0.0.1" {
+			t.Errorf("json[%d] host = %v, want 127.0.0.1", i, m["host"])
+		}
+		if m["name"] != "" {
+			t.Errorf("json[%d] name = %v, want empty for an IP literal", i, m["name"])
+		}
+		if m["status"] != "up" {
+			t.Errorf("json[%d] status = %v, want up", i, m["status"])
+		}
 	}
-	if m["host"] != "127.0.0.1" {
-		t.Errorf("json host = %v, want 127.0.0.1", m["host"])
-	}
-	if m["name"] != "" {
-		t.Errorf("json name = %v, want empty for an IP literal", m["name"])
-	}
-	if m["status"] != "up" {
-		t.Errorf("json status = %v, want up", m["status"])
+	// The FIRST line is the establishment announcement: its stats carry the
+	// single triggering success (min == max == avg), proving it is the live
+	// announcement, not a completed-period record.
+	var first map[string]any
+	_ = json.Unmarshal([]byte(lines[0]), &first)
+	if first["min_ms"] != first["max_ms"] {
+		t.Errorf("establishment line should carry one sample (min==max), got %v/%v", first["min_ms"], first["max_ms"])
 	}
 }
 
 // TestStdoutCSVShape asserts --stdout-csv emits the same machine-readable
-// CSV shape as the log format, not the table.
+// CSV shape as the log format, not the table, and that it announces
+// establishment (two lines for a stable run).
 func TestStdoutCSVShape(t *testing.T) {
 	host, port, close := startLocalListener(t)
 	defer close()
@@ -83,16 +98,19 @@ func TestStdoutCSVShape(t *testing.T) {
 		t.Errorf("table/summary leaked into stdout stream: %q", out.String())
 	}
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("stdout lines = %d, want exactly 1: %q", len(lines), out.String())
+	if len(lines) != 2 {
+		t.Fatalf("stdout lines = %d, want exactly 2 (establishment + final): %q", len(lines), out.String())
 	}
-	fields := strings.Split(lines[0], ",")
-	if len(fields) != 9 {
-		t.Fatalf("csv fields = %d, want 9: %q", len(fields), lines[0])
-	}
-	// timestamp,address,name,state,duration_seconds,min,max,avg,fails
-	if fields[1] != "127.0.0.1" || fields[2] != "" || fields[3] != "up" {
-		t.Errorf("csv cells wrong (address/name/state): %q", lines[0])
+	// Both lines carry the 9-column shape; both are the up state.
+	for _, ln := range lines {
+		fields := strings.Split(ln, ",")
+		if len(fields) != 9 {
+			t.Fatalf("csv fields = %d, want 9: %q", len(fields), ln)
+		}
+		// timestamp,address,name,state,duration_seconds,min,max,avg,fails
+		if fields[1] != "127.0.0.1" || fields[2] != "" || fields[3] != "up" {
+			t.Errorf("csv cells wrong (address/name/state): %q", ln)
+		}
 	}
 }
 
@@ -132,10 +150,12 @@ func TestStdoutJSONWithLogFile(t *testing.T) {
 	if strings.Contains(out.String(), "TIME") || strings.Contains(out.String(), "summary") {
 		t.Errorf("table/summary leaked into stdout stream: %q", out.String())
 	}
-	// The stdout stream and the log file carry the same single event.
+	// The stream and the log file differ BY DESIGN: the stream is live
+	// reporting (announces establishment → 2 lines for a stable run), the
+	// log file is append-only history (completed periods → 1 final line).
 	stdoutLines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
-	if len(stdoutLines) != 1 {
-		t.Fatalf("stdout lines = %d, want 1: %q", len(stdoutLines), out.String())
+	if len(stdoutLines) != 2 {
+		t.Fatalf("stdout lines = %d, want 2 (establishment + final): %q", len(stdoutLines), out.String())
 	}
 	fileData, err := os.ReadFile(logPath)
 	if err != nil {
@@ -143,11 +163,11 @@ func TestStdoutJSONWithLogFile(t *testing.T) {
 	}
 	fileLines := strings.Split(strings.TrimSuffix(string(fileData), "\n"), "\n")
 	if len(fileLines) != 1 {
-		t.Fatalf("log file lines = %d, want 1: %q", len(fileLines), fileData)
+		t.Fatalf("log file lines = %d, want 1 (completed period only, no establishment): %q", len(fileLines), fileData)
 	}
 	// The flags select the display, the log file is independent: the
 	// stdout stream is JSON (from --stdout-json) while the file stays in
-	// --log-format's default CSV. Same single event on both.
+	// --log-format's default CSV. Both carry the up state.
 	var m map[string]any
 	if err := json.Unmarshal([]byte(stdoutLines[0]), &m); err != nil {
 		t.Fatalf("stdout event not JSON: %v\n%s", err, stdoutLines[0])
