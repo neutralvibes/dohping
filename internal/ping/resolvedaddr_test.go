@@ -12,7 +12,7 @@ import (
 // wrong accessor would show or record an address the probes never used.
 
 func TestICMPProbeResolvedAddr(t *testing.T) {
-	p := newICMPProbe(nil, net.ParseIP("127.0.0.1"), false, 0)
+	p := newICMPProbe("ip4:icmp", net.ParseIP("127.0.0.1"), false, 0)
 	if got := p.ResolvedAddr(); got != "127.0.0.1" {
 		t.Errorf("ICMP ResolvedAddr() = %q, want 127.0.0.1", got)
 	}

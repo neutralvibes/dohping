@@ -141,6 +141,33 @@ Implementations may choose higher defaults, but the behavior must be documented.
 
 Effective detection latency: probes do not overlap, and a failing probe takes up to `--timeout`. When the host is failing, `--down-after N` therefore means roughly `N × timeout` of wall-clock time before the status flips to `down` (e.g. `--down-after 3` with a 2s timeout ≈ 6s).
 
+### 4.4 Probe Lifecycle: Resolve Once, Fresh Transport Per Probe
+
+The target hostname is resolved **exactly once** at probe construction; every
+probe in the run uses that single resolved address. No probe ever
+re-resolves, because a second resolution can return a different address
+(round-robin DNS) and a monitoring tool must not silently re-point itself at
+a different host mid-run.
+
+The **transport is fresh for every probe**:
+
+- ICMP: a new ICMP socket is opened per probe and closed when the probe
+  completes. No socket is held across probes.
+- TCP: a new connection is dialed per probe (existing behavior).
+- System-ping fallback: a new `ping` subprocess runs per probe (existing
+  behavior).
+
+The probe object carries no connection state between probes. The ICMP
+identity (ID and sequence) is kept on the probe object so it remains
+continuous across the fresh sockets.
+
+Rationale: a transport held open across probes can go stale — for example a
+raw ICMP socket whose network path changed can silently stop delivering
+replies and report `down` forever while the host is reachable. A fresh
+transport per probe means a stale transport can affect at most one probe;
+the next probe starts clean. The cost is negligible against the probe
+interval (socket creation is microseconds; the interval is seconds).
+
 ## 5. Status Model
 
 ### 5.1 States

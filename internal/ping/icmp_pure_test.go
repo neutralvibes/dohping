@@ -67,7 +67,7 @@ func TestPeerIPEquals(t *testing.T) {
 func TestNewICMPProbeDefaults(t *testing.T) {
 	// Pure constructor: pins the tier-1 default wiring without any socket.
 	ip := net.IPv4(127, 0, 0, 1)
-	p := newICMPProbe(nil, ip, false, 0)
+	p := newICMPProbe("ip4:icmp", ip, false, 0)
 	if p == nil {
 		t.Fatal("newICMPProbe returned nil")
 	}
@@ -77,22 +77,32 @@ func TestNewICMPProbeDefaults(t *testing.T) {
 	if p.isV6 {
 		t.Error("isV6 = true for an IPv4 address, want false")
 	}
+	if p.network != "ip4:icmp" {
+		t.Errorf("network = %q, want ip4:icmp (raw socket)", p.network)
+	}
 	// id must be a non-zero 16-bit value derived from the process.
 	if p.id == 0 || p.id > 0xffff {
 		t.Errorf("id = %d, want in (0, 65535]", p.id)
 	}
 	// IPv6 detection.
-	p6 := newICMPProbe(nil, net.ParseIP("::1"), true, 0)
+	p6 := newICMPProbe("ip6:ipv6-icmp", net.ParseIP("::1"), true, 0)
 	if !p6.isV6 {
 		t.Error("isV6 = false for IPv6, want true")
 	}
+	if p6.network != "ip6:ipv6-icmp" {
+		t.Errorf("network = %q, want ip6:ipv6-icmp (raw socket)", p6.network)
+	}
 }
 
-func TestICMPProbeCloseNilConn(t *testing.T) {
-	// Close on a probe whose conn was already closed (or never opened) is a
-	// safe no-op — guards the "conn set to nil after Close" path.
-	p := &ICMPProbe{conn: nil}
+func TestICMPProbeCloseNoOp(t *testing.T) {
+	// Close is a no-op: the probe holds no persistent socket between
+	// probes (a fresh socket is opened per Probe call). Calling it any
+	// number of times must be safe and return nil.
+	p := &ICMPProbe{network: "ip4:icmp", ip: net.IPv4(127, 0, 0, 1)}
 	if err := p.Close(); err != nil {
-		t.Errorf("Close on nil conn = %v, want nil", err)
+		t.Errorf("Close = %v, want nil", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("second Close = %v, want nil (idempotent)", err)
 	}
 }
