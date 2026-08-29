@@ -175,12 +175,9 @@ jobs:
           fail_on_unmatched_files: true
           draft: true
 
-      # Defender false-positive tracking: open an issue for the WDSI
+      # Defender false-positive tracking: open an issue for Microsoft
       # submission once the release draft is attached. The submission
-      # itself is a manual human act (the portal is a web form); this step
-      # only guarantees it cannot be forgotten — the issue is the tracking
-      # record the reminder checks. Mechanical, never gating on the
-      # submission.
+      # itself has to be performed manually (the portal is a web form)
       - name: Open Defender false-positive tracking issue
         env:
           GH_TOKEN: ${{ github.token }}
