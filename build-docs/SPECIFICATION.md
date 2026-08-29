@@ -803,18 +803,35 @@ When stdin is a terminal, pressing `q` (or `Q`) triggers the same graceful shutd
 ### 15.5 Structured Stdout Modes
 
 `--stdout-json` and `--stdout-csv` select a structured output mode: the
-normal table display is superseded entirely, and the tool emits one
-structured event per status period to stdout instead. The data and schema
-are identical to the log format (§14) — CSV columns
+normal table display is superseded entirely, and the tool emits structured
+events to stdout instead. The data and schema are identical to the log
+format (§14) — CSV columns
 `timestamp,address,name,state,duration_seconds,min_ms,max_ms,avg_ms,fails`,
 or the JSON object per event — the only difference is the delivery stream.
 
+The stream is **live reporting in structured form**: it behaves like the
+live table, not like an append-only history.
+
 - The structured stream replaces the table, header, and resolution caption
   for the whole run (it is not one-shot; it streams until the run ends).
+- It **announces the current status as soon as it is established** at
+  startup (`unknown` → `up`/`down`/`error`), matching the live line
+  appearing on screen. The announcement carries a fresh duration (the
+  period has just begun).
+- On a **confirmed flip** between established states, it emits the finalized
+  period that just ended (as before).
+- At **shutdown**, it emits the final period with its true total duration
+  (as before).
+- A stable run therefore produces two events for the one status period:
+  the establishment announcement (immediately useful) and the final record
+  (exact numbers at the end) — the same way the live table shows the
+  current line and the exit summary shows the totals.
 - `--stdout-json` and `--stdout-csv` are mutually opposed (usage error,
   exit 2 — §16.4).
-- A `--log-file` may be given alongside: the same events are written to the
-  file too. The flags select the display; the log file is independent.
+- A `--log-file` may be given alongside: the flags select the display; the
+  log file is independent. The **log file keeps the completed-period
+  shape** (it records finalized periods and the final state, not the
+  establishment announcement) — append-only history stays append-only.
 - `--quiet` is redundant with these modes (the display is already
   superseded) but not an error.
 
